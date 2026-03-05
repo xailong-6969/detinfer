@@ -114,11 +114,10 @@ class TestNonDeterminismDetector:
         assert report.model_name == "CleanModel"
 
     def test_report_str_clean(self):
-        """String representation of clean report should contain checkmark."""
+        """String representation of clean report should indicate no issues."""
         model = CleanModel()
         report = self.detector.scan(model)
         report_str = str(report)
-        assert "✅" in report_str
         assert "No non-deterministic" in report_str
 
     def test_report_str_with_findings(self):

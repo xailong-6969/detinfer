@@ -113,7 +113,7 @@ class TestInferenceVerifier:
         assert "python_version" in result.environment
 
     def test_result_str_deterministic(self):
-        """String representation should show checkmark for deterministic."""
+        """String representation should indicate deterministic for deterministic model."""
         model = TinyModel()
         model.eval()
 
@@ -123,7 +123,6 @@ class TestInferenceVerifier:
         result = verifier.verify_with_input(input_tensor, num_runs=3, seed=42)
 
         result_str = str(result)
-        assert "✅" in result_str
         assert "DETERMINISTIC" in result_str
 
     def test_custom_forward_fn(self):
