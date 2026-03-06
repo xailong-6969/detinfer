@@ -104,7 +104,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 do_sample=False,
             )
         output_bytes = output.cpu().numpy().tobytes()
-        h = hashlib.sha256(output_bytes).hexdigest()[:32]
+        h = hashlib.sha256(output_bytes).hexdigest()
         text = tokenizer.decode(output[0], skip_special_tokens=True)
         raw_hashes.append(h)
         raw_texts.append(text)
@@ -142,7 +142,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     determl_hashes = []
     for i in range(num_runs):
         result = engine.run(prompt, max_new_tokens=50)
-        h = result.canonical_hash[:32]
+        h = result.canonical_hash
         determl_hashes.append(h)
         match = "" if i == 0 else (" ✓ same" if h == determl_hashes[0] else " ✗ DIFFERENT")
         print(f"  Run {i+1}: {h}{match}")
