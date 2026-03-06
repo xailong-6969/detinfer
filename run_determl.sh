@@ -110,38 +110,42 @@ fi
 echo_green ">> Using seed: $SEED"
 
 # ============================================================================
-# Step 6: Choose mode
+# Step 6: Main menu loop
 # ============================================================================
-echo ""
-echo_green ">> What would you like to do?"
-echo "   1) run    - Interactive deterministic inference"
-echo "   2) scan   - Scan model for non-deterministic ops"
-echo "   3) verify - Verify model produces deterministic output"
-echo "   4) info   - Show environment information"
-echo ""
-echo -en "${GREEN}>> Choose [1-4] (default: 1): ${RESET}"
-read -p "" MODE_CHOICE
+while true; do
+    echo ""
+    echo_green ">> What would you like to do?"
+    echo "   1) run    - Interactive deterministic inference"
+    echo "   2) scan   - Scan model for non-deterministic ops"
+    echo "   3) verify - Verify model produces deterministic output"
+    echo "   4) info   - Show environment information"
+    echo "   5) exit   - Exit determl"
+    echo ""
+    echo -en "${GREEN}>> Choose [1-5] (default: 1): ${RESET}"
+    read -p "" MODE_CHOICE
 
-case "${MODE_CHOICE:-1}" in
-    1|run)
-        echo_green ">> Starting interactive mode..."
-        determl run "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
-        ;;
-    2|scan)
-        echo_green ">> Scanning model..."
-        determl scan "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
-        ;;
-    3|verify)
-        echo_green ">> Verifying determinism..."
-        determl verify "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
-        ;;
-    4|info)
-        determl info
-        ;;
-    *)
-        echo_red ">> Invalid choice. Running in interactive mode..."
-        determl run "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
-        ;;
-esac
-
-echo_green ">> Done!"
+    case "${MODE_CHOICE:-1}" in
+        1|run)
+            echo_green ">> Starting interactive mode..."
+            determl run "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
+            ;;
+        2|scan)
+            echo_green ">> Scanning model..."
+            determl scan "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
+            ;;
+        3|verify)
+            echo_green ">> Verifying determinism..."
+            determl verify "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
+            ;;
+        4|info)
+            determl info
+            ;;
+        5|exit|quit|q)
+            echo_green ">> Done!"
+            break
+            ;;
+        *)
+            echo_red ">> Invalid choice. Please select 1-5."
+            ;;
+    esac
+done
