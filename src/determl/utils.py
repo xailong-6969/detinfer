@@ -86,7 +86,7 @@ def get_environment_snapshot() -> dict[str, Any]:
                 "name": torch.cuda.get_device_name(i),
                 "capability": torch.cuda.get_device_capability(i),
                 "total_memory_mb": round(
-                    torch.cuda.get_device_properties(i).total_mem / (1024**2), 1
+                    torch.cuda.get_device_properties(i).total_memory / (1024**2), 1
                 ),
             }
             for i in range(torch.cuda.device_count())
