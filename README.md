@@ -46,13 +46,13 @@ The script automatically:
 git clone -b v2-enforcement https://github.com/xailong-6969/determl.git
 cd determl
 
-# Basic (torch + numpy)
-pip install -e .
-
-# With HuggingFace model support
+# Recommended — includes HuggingFace model support (load any model by name)
 pip install -e ".[transformers]"
 
-# With dev tools (pytest)
+# Minimal — only core enforcement (use if you have your own model, no HuggingFace)
+pip install -e .
+
+# For contributors — includes pytest for running the test suite
 pip install -e ".[dev]"
 ```
 
