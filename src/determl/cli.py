@@ -6,6 +6,8 @@ Provides the `determl` command with subcommands:
   determl scan <model>             -- Scan for non-deterministic ops
   determl verify <model>           -- Verify determinism (auto-prompt)
   determl compare <model>          -- Before/after determl comparison
+  determl export <model>           -- Export inference proof to JSON
+  determl cross-verify <proof.json> -- Verify proof on this machine
   determl info                     -- Show environment info
 """
 
@@ -83,6 +85,45 @@ def cmd_benchmark(args: argparse.Namespace) -> None:
     print("\nRunning benchmark...\n")
 
     result = run_benchmark(engine, config, max_new_tokens=args.max_tokens)
+    print(result)
+
+
+def cmd_export(args: argparse.Namespace) -> None:
+    """Export an inference proof to a JSON file."""
+    from determl.engine import DeterministicEngine
+    from determl.proof import create_proof
+
+    print(f"Loading model: {args.model}...")
+    engine = DeterministicEngine(
+        seed=args.seed,
+        precision=args.precision,
+        device=args.device,
+    )
+    engine.load(args.model)
+
+    prompt = args.prompt or "What is 2 + 2? Answer with just the number."
+    print(f"Running inference with prompt: {prompt!r}")
+
+    proof = create_proof(engine, prompt, max_new_tokens=args.max_tokens)
+    proof.save(args.output)
+
+    print(f"\n{proof}")
+    print(f"\nProof saved to: {args.output}")
+    print(f"\nCopy this file to another machine and run:")
+    print(f"  determl cross-verify {args.output}")
+
+
+def cmd_cross_verify(args: argparse.Namespace) -> None:
+    """Verify an inference proof on this machine."""
+    from determl.proof import InferenceProof, cross_verify
+
+    print(f"Loading proof from: {args.proof_file}")
+    proof = InferenceProof.load(args.proof_file)
+    print(f"\nOriginal proof:")
+    print(proof)
+
+    print(f"\nRe-running inference locally...")
+    result = cross_verify(proof)
     print(result)
 
 
@@ -263,6 +304,20 @@ def main() -> None:
     bench_parser.add_argument("--device", default=None, help="Device (default: auto)")
     bench_parser.add_argument("--max-tokens", type=int, default=256, help="Max new tokens per prompt (default: 256)")
 
+    # -- determl export <model> --
+    export_parser = subparsers.add_parser("export", help="Export inference proof to JSON")
+    export_parser.add_argument("model", help="HuggingFace model name")
+    export_parser.add_argument("--output", "-o", default="proof.json", help="Output file (default: proof.json)")
+    export_parser.add_argument("--prompt", default=None, help="Test prompt (default: auto)")
+    export_parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    export_parser.add_argument("--precision", default="high", help="Canonical precision (default: high)")
+    export_parser.add_argument("--device", default=None, help="Device (default: auto)")
+    export_parser.add_argument("--max-tokens", type=int, default=256, help="Max new tokens (default: 256)")
+
+    # -- determl cross-verify <proof.json> --
+    xverify_parser = subparsers.add_parser("cross-verify", help="Verify proof on this machine")
+    xverify_parser.add_argument("proof_file", help="Path to proof JSON file")
+
     # -- determl run <model> --
     run_parser = subparsers.add_parser("run", help="Interactive deterministic inference")
     run_parser.add_argument("model", help="HuggingFace model name")
@@ -283,6 +338,8 @@ def main() -> None:
         "verify": cmd_verify,
         "compare": cmd_compare,
         "benchmark": cmd_benchmark,
+        "export": cmd_export,
+        "cross-verify": cmd_cross_verify,
         "run": cmd_run,
     }
 

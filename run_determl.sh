@@ -115,15 +115,17 @@ echo_green ">> Using seed: $SEED"
 while true; do
     echo ""
     echo_green ">> What would you like to do?"
-    echo "   1) run       - Interactive deterministic inference"
-    echo "   2) scan      - Scan model for non-deterministic ops"
-    echo "   3) verify    - Verify model produces deterministic output"
-    echo "   4) compare   - Before vs after determl comparison"
-    echo "   5) benchmark - Full determinism benchmark (auto-scales)"
-    echo "   6) info      - Show environment information"
-    echo "   7) exit      - Exit determl"
+    echo "   1) run          - Interactive deterministic inference"
+    echo "   2) scan         - Scan model for non-deterministic ops"
+    echo "   3) verify       - Verify model produces deterministic output"
+    echo "   4) compare      - Before vs after determl comparison"
+    echo "   5) benchmark    - Full determinism benchmark (auto-scales)"
+    echo "   6) export       - Export inference proof (for cross-GPU verify)"
+    echo "   7) cross-verify - Verify a proof from another machine"
+    echo "   8) info         - Show environment information"
+    echo "   9) exit         - Exit determl"
     echo ""
-    echo -en "${GREEN}>> Choose [1-7] (default: 1): ${RESET}"
+    echo -en "${GREEN}>> Choose [1-9] (default: 1): ${RESET}"
     read -p "" MODE_CHOICE
 
     case "${MODE_CHOICE:-1}" in
@@ -147,15 +149,24 @@ while true; do
             echo_green ">> Running benchmark..."
             determl benchmark "$MODEL_NAME" --seed "$SEED" --device "$DEVICE"
             ;;
-        6|info)
+        6|export)
+            echo_green ">> Exporting proof..."
+            determl export "$MODEL_NAME" --seed "$SEED" --device "$DEVICE" -o proof.json
+            ;;
+        7|cross-verify)
+            echo -en "${GREEN}>> Enter proof file path: ${RESET}"
+            read -p "" PROOF_FILE
+            determl cross-verify "${PROOF_FILE:-proof.json}"
+            ;;
+        8|info)
             determl info
             ;;
-        7|exit|quit|q)
+        9|exit|quit|q)
             echo_green ">> Done!"
             break
             ;;
         *)
-            echo_red ">> Invalid choice. Please select 1-7."
+            echo_red ">> Invalid choice. Please select 1-9."
             ;;
     esac
 done
