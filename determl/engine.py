@@ -149,17 +149,22 @@ class DeterministicEngine:
         self.model_name: str = ""
         self.enforcement_report: EnforcementReport | None = None
         self.fingerprint: EnvironmentFingerprint | None = None
+        self._multi_gpu: bool = False  # True when using device_map
 
     def load(
         self,
         model_name: str,
         torch_dtype: torch.dtype | str = "auto",
+        device_map: str | dict | None = None,
     ) -> EnforcementReport:
         """Load a HuggingFace model by name and enforce determinism.
 
         Args:
             model_name: HuggingFace model ID (e.g., "Qwen/Qwen2.5-Coder-0.5B-Instruct").
             torch_dtype: Data type for model loading.
+            device_map: Device placement strategy for multi-GPU.
+                        Use "auto" to split across all available GPUs.
+                        Use None for single-device (default).
 
         Returns:
             EnforcementReport showing what ops were fixed.
@@ -173,24 +178,35 @@ class DeterministicEngine:
             ) from e
 
         self.model_name = model_name
+        self._multi_gpu = device_map is not None
 
-        # Load tokenizer and model
+        # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        # Load model — with or without device_map
+        load_kwargs = {"torch_dtype": torch_dtype}
+        if device_map is not None:
+            load_kwargs["device_map"] = device_map
+
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=torch_dtype
+            model_name, **load_kwargs
         )
 
         # Ensure pad token
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Move to device
-        self.model.to(self.device)
+        # Move to device (only for single-device mode)
+        if not self._multi_gpu:
+            self.model.to(self.device)
 
         # Enforce determinism (patches model in-place)
         self.enforcement_report = self.enforcer.enforce(
             self.model, model_name=model_name
         )
+
+        # Lock seeds on ALL GPUs
+        self.config.apply()
 
         # Capture environment fingerprint
         self.fingerprint = self.guardian.create_fingerprint()
@@ -251,8 +267,9 @@ class DeterministicEngine:
         start = time.perf_counter()
 
         with self.enforcer.deterministic_context():
-            # Tokenize
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            # Tokenize — send to correct device
+            input_device = self._get_input_device()
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(input_device)
 
             # Generate with greedy decoding (no randomness)
             output_ids = self.model.generate(
@@ -300,7 +317,8 @@ class DeterministicEngine:
         start = time.perf_counter()
 
         with self.enforcer.deterministic_context():
-            input_tensor = input_tensor.to(self.device)
+            input_device = self._get_input_device()
+            input_tensor = input_tensor.to(input_device)
             output = self.model(input_tensor)
 
             # Handle different output types
@@ -399,7 +417,24 @@ class DeterministicEngine:
 
     def __repr__(self) -> str:
         model = self.model_name or "no model"
+        device_info = "multi-gpu" if self._multi_gpu else self.device
         return (
             f"DeterministicEngine(model='{model}', seed={self.seed}, "
-            f"precision='{self.precision.value}', device='{self.device}')"
+            f"precision='{self.precision.value}', device='{device_info}')"
         )
+
+    def _get_input_device(self) -> str | torch.device:
+        """Get the correct device for input tensors.
+
+        For multi-GPU models, inputs go to the first device in the model's
+        device map. For single-device, inputs go to self.device.
+        """
+        if self._multi_gpu and self.model is not None:
+            # For models loaded with device_map, get the device of the
+            # first parameter (usually the embedding layer)
+            try:
+                first_param = next(self.model.parameters())
+                return first_param.device
+            except StopIteration:
+                return self.device
+        return self.device
