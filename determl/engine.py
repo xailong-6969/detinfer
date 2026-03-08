@@ -32,6 +32,8 @@ import torch.nn as nn
 # Suppress HuggingFace warnings about setting top_k/temperature when do_sample=False
 warnings.filterwarnings("ignore", message=".*do_sample.*is set to.*")
 warnings.filterwarnings("ignore", message=".*`do_sample` is set to `False`.*")
+warnings.filterwarnings("ignore", message=".*max_new_tokens.*max_length.*")
+warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
 
 from determl.config import DeterministicConfig
 from determl.enforcer import DeterministicEnforcer, EnforcementReport
@@ -267,18 +269,26 @@ class DeterministicEngine:
         start = time.perf_counter()
 
         with self.enforcer.deterministic_context():
+            # Auto-apply chat template if available (for chat models)
+            formatted_prompt = prompt
+            if hasattr(self.tokenizer, 'chat_template') and self.tokenizer.chat_template:
+                try:
+                    messages = [{"role": "user", "content": prompt}]
+                    formatted_prompt = self.tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                except Exception:
+                    pass  # Fall back to raw prompt if template fails
+
             # Tokenize — send to correct device
             input_device = self._get_input_device()
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(input_device)
+            inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(input_device)
 
             # Generate with greedy decoding (no randomness)
             output_ids = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
-                temperature=1.0,
-                top_k=0,
-                top_p=1.0,
             )
 
             # Decode new tokens only
