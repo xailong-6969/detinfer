@@ -205,12 +205,17 @@ def create_proof(engine, prompt: str, max_new_tokens: int = 256) -> InferencePro
         gpu_name = torch.cuda.get_device_name(0)
         cuda_version = torch.version.cuda
 
+    # Extract precision as string (engine stores it as Precision enum)
+    precision_val = getattr(engine, "precision", "high")
+    if hasattr(precision_val, "value"):
+        precision_val = precision_val.value
+
     return InferenceProof(
         model_name=getattr(engine, "model_name", "unknown"),
         seed=getattr(engine, "seed", 42),
         prompt=prompt,
         max_new_tokens=max_new_tokens,
-        precision=getattr(engine, "precision", "high"),
+        precision=precision_val,
         canonical_hash=result.canonical_hash,
         raw_hash=result.raw_hash,
         text_output=result.text,

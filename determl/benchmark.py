@@ -98,6 +98,15 @@ def get_all_prompts() -> list[tuple[str, str]]:
     return result
 
 
+def _short_prompt(prompt: str, max_len: int = 40) -> str:
+    """Get a clean single-line summary of a prompt for display."""
+    # Take first line only (multiline prompts like the Fibonacci one)
+    first_line = prompt.split("\n")[0].strip()
+    if len(first_line) > max_len:
+        return first_line[:max_len - 3] + "..."
+    return first_line
+
+
 # ---------------------------------------------------------------------------
 # Auto-scaling logic
 # ---------------------------------------------------------------------------
@@ -209,7 +218,7 @@ class BenchmarkResult:
 
         for r in self.prompt_results:
             cat = r.category
-            prompt_short = r.prompt[:35] + "..." if len(r.prompt) > 35 else r.prompt
+            prompt_short = _short_prompt(r.prompt, 35)
             runs = f"{r.num_runs}/{r.num_runs}"
             status = "\u2713 PASS" if r.is_deterministic else "\u2717 FAIL"
             lines.append(f"  {cat:<14} {prompt_short:<38} {runs:<6} {status}")
@@ -292,7 +301,8 @@ def run_benchmark(
         # Progress
         status = "\u2713" if pr.is_deterministic else "\u2717"
         pct = (idx + 1) / len(selected) * 100
-        print(f"  [{pct:5.1f}%] {status} {category:<14} {prompt[:45]}...")
+        prompt_display = _short_prompt(prompt, 45)
+        print(f"  [{pct:5.1f}%] {status} {category:<14} {prompt_display}")
 
     result.elapsed_seconds = time.time() - start
 
