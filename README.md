@@ -64,6 +64,44 @@ pip install -e ".[dev]"
 
 ---
 
+## Getting Started
+
+### If you installed via `run_determl.sh`
+
+The interactive menu is already open — select an option and follow the prompts. The script handles everything for you.
+
+### If you installed manually via `pip install`
+
+After installation, you can use determl in two ways:
+
+**From the terminal (CLI):**
+
+```bash
+# Replace <model> with any HuggingFace model, e.g. gpt2, Qwen/Qwen2.5-0.5B-Instruct, etc.
+
+determl run <model>            # Interactive inference — type prompts, get deterministic output
+determl verify <model>         # Verify determinism — runs 5 times, compares hashes
+determl benchmark <model>      # Full stress test with 36 prompts across 8 categories
+determl compare <model>        # Side-by-side: without determl vs with determl
+determl info                   # Show your GPU and environment details
+```
+
+**From Python (in your own code):**
+
+```python
+import determl
+
+# One line — locks all randomness globally
+determl.enforce(seed=42)
+
+# Now any PyTorch code is deterministic:
+output = model(input)           # inference
+loss.backward()                 # training
+optimizer.step()                # weight updates
+```
+
+---
+
 ## Usage
 
 ### 1. One-Line Enforcement (for any ML code)
