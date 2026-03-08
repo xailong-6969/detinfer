@@ -162,19 +162,7 @@ for step, batch in enumerate(dataloader):
 
 ### 5. Cross-GPU Proof Verification
 
-```python
-from determl.proof import create_proof, cross_verify, InferenceProof
-
-# Machine A: export proof
-proof = create_proof(engine, "What is 2+2?")
-proof.save("proof.json")
-
-# Machine B: verify it
-proof = InferenceProof.load("proof.json")
-result = cross_verify(proof)
-print(result)
-# ✓ VERIFIED — RTX 3070 and T4 produced identical canonical hashes
-```
+Prove that two different GPUs produce the same output — see the [Cross-GPU Verification Guide](#cross-gpu-verification-guide) below for the full step-by-step walkthrough.
 
 ---
 
@@ -256,25 +244,90 @@ Auto-scales based on model size:
 ### Before vs After Comparison
 
 ```bash
-determl compare Qwen/Qwen2.5-Coder-0.5B-Instruct
+determl compare <model>
 ```
 
 Runs the model first **without** determl (raw PyTorch) then **with** determl, showing hash differences side by side.
 
-### Cross-GPU Verification
+### Cross-GPU Verification Guide
 
-Export a proof on one GPU, verify on another:
+This proves that two different machines (with different GPUs) produce the exact same output.
+
+**How it works:**
+
+```
+Machine A                          Machine B
+─────────                          ─────────
+Runs inference                     
+  → gets hash abc123               
+  → saves to proof.json            
+                                   
+        ──── transfer proof.json ────→
+                                   
+                                   Reads proof.json (Machine A's hash)
+                                   Runs the SAME inference locally
+                                     → gets hash abc123
+                                   Compares: abc123 == abc123? ✓ MATCH
+```
+
+Only **one** `proof.json` is created. Machine B does not create its own — it re-runs the inference and compares its result with Machine A's hash automatically.
+
+**What you need:**
+- Two machines with GPUs (e.g., a cloud GPU instance + another server, or any two machines)
+- Both machines must have determl installed
+- Both machines must use the same model
+
+**Step 1: Install determl on both machines**
 
 ```bash
-# Machine A (e.g., Vast.ai RTX 3070)
-determl export Qwen/Qwen2.5-Coder-0.5B-Instruct -o proof.json
-
-# Copy proof.json to Machine B
-
-# Machine B (e.g., Colab T4)
-determl cross-verify proof.json
-# → VERIFIED: canonical hashes match across GPUs
+# Run this on both Machine A and Machine B:
+git clone -b v2-enforcement https://github.com/xailong-6969/determl.git
+cd determl
+pip install -e ".[transformers]"
 ```
+
+**Step 2: Export a proof on Machine A**
+
+```bash
+determl export <model> -o proof.json
+
+# This will:
+#   1. Load the model
+#   2. Run inference with a test prompt
+#   3. Save the canonical hash, environment info, and output to proof.json
+```
+
+**Step 3: Transfer proof.json to Machine B**
+
+Copy `proof.json` from Machine A to Machine B however you prefer — `scp`, file upload, copy-paste, etc.
+
+**Step 4: Verify on Machine B**
+
+```bash
+cd determl
+determl cross-verify proof.json
+```
+
+**What you'll see:**
+
+```
+  CROSS-GPU VERIFICATION RESULT
+  =================================================================
+
+  Original (remote):
+    GPU:            NVIDIA GeForce RTX 3070
+    Canonical hash: 799519fee8d50aca...
+
+  Local (this machine):
+    GPU:            Tesla T4
+    Canonical hash: 799519fee8d50aca...
+
+  Canonical hash match: ✓ YES
+
+  ✓ VERIFIED — Deterministic execution confirmed across GPUs!
+```
+
+If both canonical hashes match → the library works. Same model + same input = same output, regardless of hardware.
 
 ---
 
