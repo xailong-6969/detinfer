@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "detinfer"
-version = "0.2.0"
+version = "0.2.1"
 description = "detinfer (Deterministic Inference) — enforce, verify and prove determinism in ML inference across hardware"
 readme = "README.md"
 license = "MIT"
