@@ -46,6 +46,11 @@ The script automatically:
 git clone https://github.com/xailong-6969/determl.git
 cd determl
 
+# Create and activate a virtual environment (required on Debian/Ubuntu)
+python3 -m venv venv
+source venv/bin/activate   # Linux/Mac
+# venv\Scripts\activate    # Windows
+
 # Recommended — includes HuggingFace model support (load any model by name)
 pip install -e ".[transformers]"
 
