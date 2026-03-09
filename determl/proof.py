@@ -48,6 +48,15 @@ class InferenceProof:
     # Metadata
     timestamp: str = ""
     determl_version: str = "2.0.0"
+    
+    # Token-level details (Gold standard schema)
+    input_tokens_hash: str = ""
+    output_tokens_hash: str = ""
+    
+    # Backend details
+    model_dtype: str = "unknown"
+    quantization: str = "none"
+    transformers_version: str = "unknown"
 
     def save(self, path: str | Path) -> None:
         """Export proof to a JSON file."""
@@ -74,13 +83,16 @@ class InferenceProof:
             f"  Prompt:         {self.prompt[:60]}{'...' if len(self.prompt) > 60 else ''}",
             f"  Max tokens:     {self.max_new_tokens}",
             f"  Precision:      {self.precision}",
+            f"  Dtype:          {self.model_dtype} | Quant: {self.quantization}",
             "-" * 60,
             f"  Canonical hash: {self.canonical_hash}",
+            f"  Input tokens:   {self.input_tokens_hash}",
+            f"  Output tokens:  {self.output_tokens_hash}",
             f"  Raw hash:       {self.raw_hash}",
             "-" * 60,
             f"  GPU:            {self.gpu_name}",
             f"  CUDA:           {self.cuda_version or 'N/A'}",
-            f"  PyTorch:        {self.torch_version}",
+            f"  PyTorch:        {self.torch_version} | HF: {self.transformers_version}",
             f"  Timestamp:      {self.timestamp}",
             "=" * 60,
         ]
@@ -104,6 +116,8 @@ class CrossVerifyResult:
     canonical_match: bool
     raw_match: bool
     text_match: bool
+    input_tokens_match: bool
+    output_tokens_match: bool
 
     elapsed_seconds: float = 0.0
 
@@ -131,6 +145,8 @@ class CrossVerifyResult:
             "",
             "-" * 65,
             f"  Canonical hash match: {'✓ YES' if self.canonical_match else '✗ NO'}",
+            f"  Input tokens match:   {'✓ YES' if self.input_tokens_match else '✗ NO (Tokenizer drift!)'}",
+            f"  Output tokens match:  {'✓ YES' if self.output_tokens_match else '✗ NO'}",
             f"  Raw hash match:       {'✓ YES' if self.raw_match else '✗ NO'}",
             f"  Text output match:    {'✓ YES' if self.text_match else '✗ NO'}",
             "-" * 65,
@@ -210,15 +226,26 @@ def create_proof(engine, prompt: str, max_new_tokens: int = 256) -> InferencePro
     if hasattr(precision_val, "value"):
         precision_val = precision_val.value
 
+    try:
+        import transformers
+        transformers_version = transformers.__version__
+    except ImportError:
+        transformers_version = "unknown"
+
     return InferenceProof(
         model_name=getattr(engine, "model_name", "unknown"),
         seed=getattr(engine, "seed", 42),
         prompt=prompt,
         max_new_tokens=max_new_tokens,
         precision=precision_val,
+        input_tokens_hash=getattr(result, 'input_tokens_hash', ''),
+        output_tokens_hash=getattr(result, 'output_tokens_hash', ''),
+        model_dtype=getattr(result, 'model_dtype', 'unknown'),
+        quantization=getattr(result, 'quantization', 'none'),
+        transformers_version=transformers_version,
         canonical_hash=result.canonical_hash,
         raw_hash=result.raw_hash,
-        text_output=result.text,
+        text_output=result.text or "",
         gpu_name=gpu_name,
         cuda_version=cuda_version,
         torch_version=torch.__version__,
@@ -265,9 +292,11 @@ def cross_verify(proof: InferenceProof) -> CrossVerifyResult:
         local_canonical_hash=result.canonical_hash,
         local_raw_hash=result.raw_hash,
         local_gpu_name=local_gpu,
-        local_text_output=result.text,
+        local_text_output=result.text or "",
         canonical_match=(result.canonical_hash == proof.canonical_hash),
         raw_match=(result.raw_hash == proof.raw_hash),
-        text_match=(result.text.strip() == proof.text_output.strip()),
+        text_match=((result.text or "").strip() == proof.text_output.strip()),
+        input_tokens_match=(getattr(result, 'input_tokens_hash', '') == getattr(proof, 'input_tokens_hash', '')),
+        output_tokens_match=(getattr(result, 'output_tokens_hash', '') == getattr(proof, 'output_tokens_hash', '')),
         elapsed_seconds=elapsed,
     )

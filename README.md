@@ -427,15 +427,31 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-### Supported Devices
+### Supported Matrix
 
-| Device | Status |
-|--------|--------|
-| NVIDIA GPUs (T4, V100, A100, RTX 3070/4090, etc.) | Fully supported |
-| CPU | Supported |
-| Multi-GPU (device_map="auto") | Supported |
-| AMD GPUs (ROCm) | Untested |
-| Apple Silicon (MPS) | Untested |
+| Feature | Status | Notes |
+|---|---|---|
+| PyTorch eager mode | **Fully supported** | Default, fully deterministic |
+| Greedy decoding | **Fully supported** | Enforced automatically (`do_sample=False`, `num_beams=1`) |
+| fp32 inference | **Fully supported** | Full determinism |
+| fp16 inference | **Fully supported** | Deterministic on supported backends |
+| CPU inference | **Fully supported** | Fully deterministic |
+| NVIDIA GPU (single) | **Fully supported** | T4, V100, A100, RTX 3070/4090, etc. |
+| HuggingFace CausalLM | **Fully supported** | GPT-2, Qwen, TinyLlama, LLaMA, etc. |
+| Cross-GPU canonical hashes | **Fully supported** | Via `determl export` + `determl cross-verify` |
+| bf16 inference | Partial | Hardware-dependent rounding; canonical hash may differ across GPU generations |
+| Multi-GPU (`device_map="auto"`) | Partial | Inference works; very large models may have split-order edge cases |
+| Flash Attention | Partial | Auto-replaced with MATH backend; may reduce throughput |
+| Quantized models (GPTQ/AWQ/bitsandbytes) | **Not supported** | Kernel-specific rounding breaks cross-machine proof |
+| `torch.compile` | **Not supported** | Graph autotuning selects different kernels across runs |
+| Beam search (`num_beams > 1`) | **Not supported** | Tie-breaking is implementation-specific |
+| Speculative decoding | **Not supported** | Draft model adds nondeterminism |
+| vLLM / paged attention | **Not supported** | KV cache paging is non-deterministic |
+| Tensor / pipeline parallelism | **Not supported** | Reduction order across devices not controlled |
+| AMD GPUs (ROCm) | Untested | |
+| Apple Silicon (MPS) | Untested | |
+
+> For the full technical specification of what "deterministic" means in determl — including exact hash definitions, proof format, and operating modes — see [docs/determinism-spec.md](docs/determinism-spec.md).
 
 ---
 

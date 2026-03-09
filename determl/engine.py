@@ -59,6 +59,10 @@ class DeterministicResult:
     output_tensor: torch.Tensor | None = None
     raw_hash: str = ""
     canonical_hash: str = ""
+    input_tokens_hash: str = ""
+    output_tokens_hash: str = ""
+    model_dtype: str = ""
+    quantization: str = ""
     precision: str = ""
     seed: int = 42
     elapsed_seconds: float = 0.0
@@ -72,6 +76,10 @@ class DeterministicResult:
         return {
             "canonical_hash": self.canonical_hash,
             "raw_hash": self.raw_hash,
+            "input_tokens_hash": self.input_tokens_hash,
+            "output_tokens_hash": self.output_tokens_hash,
+            "model_dtype": self.model_dtype,
+            "quantization": self.quantization,
             "precision": self.precision,
             "seed": self.seed,
             "elapsed_seconds": self.elapsed_seconds,
@@ -288,13 +296,16 @@ class DeterministicEngine:
             # Tokenize — send to correct device
             input_device = self._get_input_device()
             inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(input_device)
+            input_tokens_hash = hash_tensor(inputs["input_ids"])
 
-            # Generate with greedy decoding (no randomness)
+            # Generate with strict greedy decoding (no randomness whatsoever)
             output_ids = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
-                do_sample=False,
+                do_sample=False,   # No sampling
+                num_beams=1,       # No beam search (also non-deterministic)
             )
+            output_tokens_hash = hash_tensor(output_ids)
 
             # Decode new tokens only
             prompt_length = inputs["input_ids"].shape[1]
@@ -307,11 +318,20 @@ class DeterministicEngine:
         raw_hash = hash_string(text)
         canonical = self.canonicalizer.canonicalize(output_ids.float())
 
+        # Get backend metadata
+        model_dtype = str(next(self.model.parameters()).dtype) if self.model else "unknown"
+        quant_config = getattr(getattr(self.model, "config", None), "quantization_config", None)
+        quantization = "bitsandbytes" if quant_config else "none" # Simplify for now, could expand to awq/gptq
+
         return DeterministicResult(
             text=text,
             output_tensor=output_ids.cpu(),
             raw_hash=raw_hash,
             canonical_hash=canonical.canonical_hash,
+            input_tokens_hash=input_tokens_hash,
+            output_tokens_hash=output_tokens_hash,
+            model_dtype=model_dtype,
+            quantization=quantization,
             precision=self.precision.value,
             seed=self.seed,
             elapsed_seconds=elapsed,
