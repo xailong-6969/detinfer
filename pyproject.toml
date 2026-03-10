@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "detinfer"
-version = "0.2.2"
+version = "0.2.3"
 description = "detinfer — deterministic runtime controls, session tracing, and replay verification for supported LLM workflows"
 readme = "README.md"
 license = "MIT"

@@ -197,8 +197,7 @@ class DeterministicAgent:
                 next_logits = outputs.logits[0, -1, :]
 
                 # Deterministic argmax with stable tie-breaking
-                next_token = deterministic_argmax(next_logits)
-                token_id = next_token.item()
+                token_id = deterministic_argmax(next_logits)
 
                 # Capture top-k for verbose trace
                 top_tokens = None
@@ -222,7 +221,7 @@ class DeterministicAgent:
                     break
 
                 # Append token for next iteration
-                next_token_tensor = next_token.unsqueeze(0).unsqueeze(0).to(input_device)
+                next_token_tensor = torch.tensor([[token_id]], device=input_device)
                 current_ids = torch.cat([current_ids, next_token_tensor], dim=1)
 
         # Set output tokens and finalize
@@ -304,8 +303,7 @@ class DeterministicAgent:
                 next_logits = outputs.logits[0, -1, :]
 
                 # Deterministic argmax with tie-breaking
-                next_token = deterministic_argmax(next_logits)
-                token_id = next_token.item()
+                token_id = deterministic_argmax(next_logits)
 
                 # Capture top-k for verbose trace
                 top_tokens = None
@@ -337,7 +335,7 @@ class DeterministicAgent:
                     break
 
                 # Append token for next iteration
-                next_token_tensor = next_token.unsqueeze(0).unsqueeze(0).to(input_device)
+                next_token_tensor = torch.tensor([[token_id]], device=input_device)
                 current_ids = torch.cat([current_ids, next_token_tensor], dim=1)
 
         # Finalize trace
