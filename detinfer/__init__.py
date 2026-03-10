@@ -11,7 +11,7 @@ Quick start:
 
 Structure:
     detinfer.inference  -- Core deterministic inference library
-    detinfer.agent      -- Deterministic chat agent with tracing
+    detinfer.agent      -- Deterministic agent with tracing
 """
 
 from __future__ import annotations

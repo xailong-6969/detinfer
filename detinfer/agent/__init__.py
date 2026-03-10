@@ -1,7 +1,7 @@
 """
 detinfer.agent -- Deterministic Agent System
 
-Multi-turn deterministic chat with token-level tracing,
+Multi-turn deterministic agent with token-level tracing,
 session replay, and diff verification.
 """
 

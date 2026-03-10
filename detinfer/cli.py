@@ -282,7 +282,7 @@ def cmd_agent(args: argparse.Namespace) -> None:
     print(f"Model loaded. Seed: {args.seed}")
     if args.system:
         print(f"System: {args.system}")
-    print(f"Deterministic chat ready.\n")
+    print(f"Deterministic agent ready.\n")
 
     # Non-interactive mode
     if args.prompt:

@@ -228,8 +228,8 @@ Both `chat()` and `chat_stream()` use manual token-by-token generation with dete
 ```python
 from detinfer import DeterministicAgent
 
-# Multi-turn deterministic agent
-agent = DeterministicAgent("gpt2", seed=42)
+# Multi-turn deterministic agent (works with any HuggingFace model)
+agent = DeterministicAgent("Qwen/Qwen2.5-0.5B-Instruct", seed=42)
 response = agent.chat("What is 2+2?")
 print(response)
 
@@ -247,6 +247,55 @@ for chunk in agent.chat_stream("Explain gravity"):
 
 # Export full session trace
 agent.export_session("session.json")
+```
+
+### Agent Step Replay (Tool Call Tracing)
+
+Register tools and call them — every call is recorded in the trace for replay and diffing.
+
+```python
+from detinfer import DeterministicAgent
+
+agent = DeterministicAgent("TinyLlama/TinyLlama-1.1B-Chat-v1.0", seed=42)
+
+# Register tools (only name + callable, never serialized)
+agent.register_tool("calculator", lambda expression: str(eval(expression)))
+agent.register_tool("lookup", lambda query: f"Result for: {query}")
+
+# Use tools — recorded as agent steps
+response = agent.chat("What is 2+2?")
+result = agent.call_tool("calculator", {"expression": "2+2"})
+response = agent.chat(f"The answer is {result}. Explain why.")
+
+# Checkpoint key decision points
+agent.checkpoint({"decision": "used_calculator", "confidence": "high"})
+
+agent.export_session("agent_session.json")
+```
+
+The exported trace includes `agent_steps`:
+
+```json
+{
+  "agent_steps": [
+    {"step": 1, "type": "llm_generation", "turn": 1, "generation_turn": 1},
+    {"step": 2, "type": "tool_call", "turn": 1, "tool": "calculator", "arguments": {"expression": "2+2"}},
+    {"step": 3, "type": "tool_result", "turn": 1, "tool": "calculator", "result": "4"},
+    {"step": 4, "type": "llm_generation", "turn": 2, "generation_turn": 2},
+    {"step": 5, "type": "checkpoint", "turn": 2, "checkpoint_data": {"decision": "used_calculator"}}
+  ],
+  "registered_tools": ["calculator", "lookup"]
+}
+```
+
+`detinfer diff` now detects tool call divergence:
+
+```
+Trace comparison: DIFFERENT
+  First mismatch: turn 2
+  Type: tool_name
+  Expected: calculator
+  Observed: web_search
 ```
 
 ### Session Export & Trace

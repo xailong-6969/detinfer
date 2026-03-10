@@ -370,6 +370,76 @@ def diff_sessions(path_a: str, path_b: str) -> DiffResult:
             details=details + [f"Matched {min_turns} turns before length difference"],
         )
 
+    # Compare agent steps (tool calls, reasoning)
+    min_steps = min(len(trace_a.agent_steps), len(trace_b.agent_steps))
+    for i in range(min_steps):
+        step_a = trace_a.agent_steps[i]
+        step_b = trace_b.agent_steps[i]
+
+        if step_a.type != step_b.type:
+            return DiffResult(
+                identical=False,
+                total_turns_a=len(trace_a.generations),
+                total_turns_b=len(trace_b.generations),
+                first_mismatch_turn=step_a.turn,
+                first_mismatch_step=step_a.step,
+                mismatch_type="agent_step_type",
+                expected=step_a.type,
+                observed=step_b.type,
+                details=details + [f"Agent step {i+1}: expected {step_a.type}, got {step_b.type}"],
+            )
+
+        if step_a.type == "tool_call":
+            if step_a.tool != step_b.tool:
+                return DiffResult(
+                    identical=False,
+                    total_turns_a=len(trace_a.generations),
+                    total_turns_b=len(trace_b.generations),
+                    first_mismatch_turn=step_a.turn,
+                    first_mismatch_step=step_a.step,
+                    mismatch_type="tool_name",
+                    expected=step_a.tool,
+                    observed=step_b.tool,
+                    details=details + [f"Expected tool: {step_a.tool}, Observed tool: {step_b.tool}"],
+                )
+            if step_a.arguments != step_b.arguments:
+                return DiffResult(
+                    identical=False,
+                    total_turns_a=len(trace_a.generations),
+                    total_turns_b=len(trace_b.generations),
+                    first_mismatch_turn=step_a.turn,
+                    first_mismatch_step=step_a.step,
+                    mismatch_type="tool_arguments",
+                    expected=str(step_a.arguments),
+                    observed=str(step_b.arguments),
+                    details=details + [f"Tool '{step_a.tool}' arguments differ"],
+                )
+
+        if step_a.type == "tool_result":
+            if step_a.result != step_b.result:
+                return DiffResult(
+                    identical=False,
+                    total_turns_a=len(trace_a.generations),
+                    total_turns_b=len(trace_b.generations),
+                    first_mismatch_turn=step_a.turn,
+                    first_mismatch_step=step_a.step,
+                    mismatch_type="tool_result",
+                    expected=step_a.result[:100],
+                    observed=step_b.result[:100],
+                    details=details + [f"Tool '{step_a.tool}' result differs"],
+                )
+
+    if len(trace_a.agent_steps) != len(trace_b.agent_steps):
+        return DiffResult(
+            identical=False,
+            total_turns_a=len(trace_a.generations),
+            total_turns_b=len(trace_b.generations),
+            mismatch_type="agent_step_count",
+            expected=len(trace_a.agent_steps),
+            observed=len(trace_b.agent_steps),
+            details=details + [f"Matched {min_steps} agent steps before count difference"],
+        )
+
     return DiffResult(
         identical=True,
         total_turns_a=len(trace_a.generations),

@@ -1,13 +1,13 @@
 """
-detinfer.agent -- Deterministic Chat Agent
+detinfer.agent -- Deterministic Agent
 
-Multi-turn deterministic chat with full token tracing,
+Multi-turn deterministic agent with full token tracing,
 prompt snapshotting, and session export.
 
 Usage:
     from detinfer import DeterministicAgent
 
-    agent = DeterministicAgent("gpt2", seed=42)
+    agent = DeterministicAgent("<model>", seed=42)  # any HuggingFace model
     agent.chat("What is 2+2?")
     agent.chat("Explain more")
     agent.export_session("session.json")
@@ -24,6 +24,7 @@ import torch
 
 from detinfer.inference.engine import DeterministicEngine
 from detinfer.agent.trace import (
+    AgentStep,
     GenerationTrace,
     SessionTrace,
     build_environment,
@@ -54,17 +55,18 @@ def deterministic_argmax(logits: torch.Tensor) -> int:
 
 
 class DeterministicAgent:
-    """Multi-turn deterministic chat agent with full tracing.
+    """Multi-turn deterministic agent with full tracing.
 
     Wraps DeterministicEngine to provide:
     - Multi-turn conversation with history tracking
     - Token-level trace recording per turn
     - Prompt snapshotting (rendered_prompt + hash per turn)
+    - Tool registration and call tracing
     - Re-seeding before each generation
     - Session export with full trace for replay/verification
 
     Usage:
-        agent = DeterministicAgent("gpt2", seed=42)
+        agent = DeterministicAgent("<model>", seed=42)  # any HuggingFace model
         response = agent.chat("Hello!")
         print(response)
         agent.export_session("session.json")
@@ -134,7 +136,9 @@ class DeterministicAgent:
         )
 
         self._turn_count = 0
+        self._agent_step_counter = 0
         self._conversation_history: list[dict] = []
+        self._tools: dict[str, Any] = {}  # name -> callable
 
         # Add system prompt to conversation history if provided
         if system_prompt:
@@ -227,6 +231,15 @@ class DeterministicAgent:
 
         # Add to session
         self.session.add_generation(gen_trace)
+
+        # Record agent step for this LLM generation
+        self._agent_step_counter += 1
+        self.session.add_agent_step(AgentStep(
+            step=self._agent_step_counter,
+            type="llm_generation",
+            turn=self._turn_count,
+            generation_turn=self._turn_count,
+        ))
 
         # Decode response
         response = tokenizer.decode(
@@ -391,3 +404,92 @@ class DeterministicAgent:
     def turn_count(self) -> int:
         """Return the number of completed turns."""
         return self._turn_count
+
+    # ------------------------------------------------------------------
+    # Tool registration and calling
+    # ------------------------------------------------------------------
+
+    def register_tool(self, name: str, fn: Any) -> None:
+        """Register a tool for deterministic agent workflows.
+
+        Only the tool name, arguments, and result are stored in the
+        trace. The callable itself is never serialized.
+
+        Args:
+            name: Tool name (e.g., 'calculator', 'web_search').
+            fn: Callable that accepts keyword arguments and returns a string.
+        """
+        self._tools[name] = fn
+        if name not in self.session.registered_tools:
+            self.session.registered_tools.append(name)
+
+    def call_tool(self, name: str, arguments: dict | None = None) -> str:
+        """Call a registered tool and record the call in the agent trace.
+
+        Records both the tool_call (name + arguments) and the
+        tool_result (output) as separate agent steps. Only stores
+        serializable data — no runtime objects.
+
+        Args:
+            name: Name of a previously registered tool.
+            arguments: Keyword arguments to pass to the tool.
+
+        Returns:
+            Tool result as a string.
+
+        Raises:
+            KeyError: If the tool is not registered.
+        """
+        if name not in self._tools:
+            raise KeyError(f"Tool '{name}' is not registered. "
+                           f"Available: {list(self._tools.keys())}")
+
+        args = arguments or {}
+
+        # Record tool_call step
+        self._agent_step_counter += 1
+        self.session.add_agent_step(AgentStep(
+            step=self._agent_step_counter,
+            type="tool_call",
+            turn=self._turn_count,
+            tool=name,
+            arguments=args,
+        ))
+
+        # Execute tool
+        result = str(self._tools[name](**args))
+
+        # Record tool_result step
+        self._agent_step_counter += 1
+        self.session.add_agent_step(AgentStep(
+            step=self._agent_step_counter,
+            type="tool_result",
+            turn=self._turn_count,
+            tool=name,
+            result=result,
+        ))
+
+        # Add tool result to conversation for context
+        self._conversation_history.append({
+            "role": "user",
+            "content": f"[Tool: {name}] Result: {result}",
+        })
+        self.session.add_message("tool", f"[{name}] {result}")
+
+        return result
+
+    def checkpoint(self, data: dict | None = None) -> None:
+        """Record a checkpoint in the agent workflow trace.
+
+        Useful for marking key decision points during replay.
+
+        Args:
+            data: Optional serializable checkpoint data.
+        """
+        self._agent_step_counter += 1
+        self.session.add_agent_step(AgentStep(
+            step=self._agent_step_counter,
+            type="checkpoint",
+            turn=self._turn_count,
+            checkpoint_data=data or {},
+        ))

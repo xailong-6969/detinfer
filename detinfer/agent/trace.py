@@ -41,6 +41,62 @@ class GenerationStep:
 
 
 # ---------------------------------------------------------------------------
+# Agent step (tool calls, reasoning steps)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentStep:
+    """A single agent step in the workflow trace.
+
+    Records tool calls, tool results, LLM generations,
+    and checkpoints. Only serializable logical state is stored.
+    No runtime objects (tensors, model refs, etc.).
+    """
+    step: int
+    type: str  # "llm_generation", "tool_call", "tool_result", "checkpoint"
+    turn: int = 0
+
+    # For tool_call / tool_result
+    tool: str = ""
+    arguments: dict = field(default_factory=dict)
+    result: str = ""
+
+    # For llm_generation (references GenerationTrace by turn)
+    generation_turn: int | None = None
+
+    # For checkpoint
+    checkpoint_data: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        d = {"step": self.step, "type": self.type, "turn": self.turn}
+        if self.type == "tool_call":
+            d["tool"] = self.tool
+            d["arguments"] = self.arguments
+        elif self.type == "tool_result":
+            d["tool"] = self.tool
+            d["result"] = self.result
+        elif self.type == "llm_generation":
+            if self.generation_turn is not None:
+                d["generation_turn"] = self.generation_turn
+        elif self.type == "checkpoint":
+            d["checkpoint_data"] = self.checkpoint_data
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AgentStep":
+        return cls(
+            step=data["step"],
+            type=data["type"],
+            turn=data.get("turn", 0),
+            tool=data.get("tool", ""),
+            arguments=data.get("arguments", {}),
+            result=data.get("result", ""),
+            generation_turn=data.get("generation_turn"),
+            checkpoint_data=data.get("checkpoint_data", {}),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Generation trace (one turn of generation)
 # ---------------------------------------------------------------------------
 
@@ -163,6 +219,12 @@ class SessionTrace:
         "backend": None,
     })
 
+    # Agent workflow steps (tool calls, reasoning)
+    agent_steps: list[AgentStep] = field(default_factory=list)
+
+    # Registered tools (names only, for verification)
+    registered_tools: list[str] = field(default_factory=list)
+
     def add_message(self, role: str, content: str) -> None:
         """Add a message to the conversation history."""
         self.messages.append({"role": role, "content": content})
@@ -170,6 +232,10 @@ class SessionTrace:
     def add_generation(self, trace: GenerationTrace) -> None:
         """Add a generation trace."""
         self.generations.append(trace)
+
+    def add_agent_step(self, agent_step: AgentStep) -> None:
+        """Add an agent workflow step (tool call, generation, etc.)."""
+        self.agent_steps.append(agent_step)
 
     def compute_session_hash(self) -> str:
         """Compute deterministic session hash.
@@ -196,6 +262,8 @@ class SessionTrace:
             "messages": self.messages,
             "generations": [g.to_dict(verbose=verbose) for g in self.generations],
             "quantization": self.quantization,
+            "agent_steps": [s.to_dict() for s in self.agent_steps],
+            "registered_tools": self.registered_tools,
         }
 
     def to_dict(self) -> dict:
@@ -214,6 +282,8 @@ class SessionTrace:
             "generations": [g.to_dict(verbose=verbose) for g in self.generations],
             "environment": self.environment,
             "quantization": self.quantization,
+            "agent_steps": [s.to_dict() for s in self.agent_steps],
+            "registered_tools": self.registered_tools,
         }
 
     def export_json(self, path: str) -> None:
@@ -244,6 +314,7 @@ class SessionTrace:
             environment=data.get("environment", {}),
             session_hash=data.get("session_hash", ""),
             quantization=data.get("quantization", {"mode": None, "backend": None}),
+            registered_tools=data.get("registered_tools", []),
         )
 
         for gen_data in data.get("generations", []):
@@ -265,6 +336,9 @@ class SessionTrace:
                     top_scores=step_data.get("top_scores"),
                 ))
             session.generations.append(trace)
+
+        for step_data in data.get("agent_steps", []):
+            session.agent_steps.append(AgentStep.from_dict(step_data))
 
         return session
 
