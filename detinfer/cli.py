@@ -361,6 +361,64 @@ def cmd_diff(args: argparse.Namespace) -> None:
     print(result)
 
 
+def cmd_verify_session(args: argparse.Namespace) -> None:
+    """Verify a session export is a valid deterministic execution proof."""
+    from detinfer.agent.trace import SessionTrace
+    from detinfer.agent.replay import replay_session
+    import time
+
+    print("═" * 60)
+    print("  DETERMINISTIC EXECUTION PROOF VERIFICATION")
+    print("═" * 60)
+
+    # Load and show session metadata
+    session = SessionTrace.from_json(args.session_file)
+    print(f"\n  Session file:  {args.session_file}")
+    print(f"  Model:        {session.model}")
+    print(f"  Model hash:   {session.model_hash[:16] + '...' if session.model_hash else 'N/A'}")
+    print(f"  Seed:         {session.seed}")
+    print(f"  Turns:        {len(session.generations)}")
+    print(f"  Session hash: {session.session_hash[:16] + '...' if session.session_hash else 'N/A'}")
+    print(f"  Schema:       v{session.schema_version}")
+
+    if session.environment:
+        env = session.environment
+        print(f"\n  Original environment:")
+        if env.get("torch"): print(f"    PyTorch:    {env['torch']}")
+        if env.get("cuda"): print(f"    CUDA:       {env['cuda']}")
+        if env.get("detinfer"): print(f"    detinfer:   {env['detinfer']}")
+
+    print(f"\n  Replaying session locally...")
+    start = time.time()
+
+    result = replay_session(
+        trace_path=args.session_file,
+        model_name=args.model,
+        strict=args.strict,
+    )
+
+    elapsed = time.time() - start
+
+    print(f"  Replay completed in {elapsed:.1f}s\n")
+    print("─" * 60)
+
+    if result.passed:
+        print(f"  ✓ VERIFIED — All {result.total_turns} turns match exactly")
+        print(f"  ✓ Session hash: {session.session_hash}")
+        print(f"  ✓ This session is a valid deterministic execution proof.")
+    else:
+        print(f"  ✗ VERIFICATION FAILED")
+        if result.failure_turn:
+            print(f"  ✗ Turn {result.failure_turn}: {result.failure_reason}")
+        if result.failure_step is not None:
+            print(f"  ✗ Step {result.failure_step}: expected token {result.expected_token}, got {result.observed_token}")
+        if result.details:
+            for d in result.details:
+                print(f"    {d}")
+
+    print("═" * 60)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="detinfer",
@@ -450,6 +508,12 @@ def main() -> None:
     diff_parser.add_argument("file_a", help="First session JSON")
     diff_parser.add_argument("file_b", help="Second session JSON")
 
+    # -- detinfer verify-session <session.json> --
+    vs_parser = subparsers.add_parser("verify-session", help="Verify a session as execution proof")
+    vs_parser.add_argument("session_file", help="Path to session JSON file")
+    vs_parser.add_argument("--model", default=None, help="Override model (uses trace model if not set)")
+    vs_parser.add_argument("--strict", action="store_true", help="Verify every generation step")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -468,6 +532,7 @@ def main() -> None:
         "chat": cmd_chat,
         "replay": cmd_replay,
         "diff": cmd_diff,
+        "verify-session": cmd_verify_session,
     }
 
     handlers[args.command](args)

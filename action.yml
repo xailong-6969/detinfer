@@ -1,0 +1,99 @@
+name: 'detinfer Determinism Check'
+description: 'Verify ML model outputs are deterministic using detinfer'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  command:
+    description: 'Command to run: verify-session, chat, verify'
+    required: true
+    default: 'verify-session'
+  session-file:
+    description: 'Path to session JSON file (for verify-session command)'
+    required: false
+  model:
+    description: 'HuggingFace model name (for chat/verify commands)'
+    required: false
+  prompt:
+    description: 'Prompt for non-interactive chat'
+    required: false
+  seed:
+    description: 'Random seed'
+    required: false
+    default: '42'
+  strict:
+    description: 'Enable strict verification (check every step)'
+    required: false
+    default: 'false'
+  export:
+    description: 'Export session trace to this path'
+    required: false
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
+
+outputs:
+  passed:
+    description: 'Whether verification passed (true/false)'
+    value: ${{ steps.run.outputs.passed }}
+  session-hash:
+    description: 'Session hash from the run'
+    value: ${{ steps.run.outputs.session_hash }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install detinfer
+      shell: bash
+      run: |
+        pip install "detinfer[transformers]"
+
+    - name: Run detinfer
+      id: run
+      shell: bash
+      run: |
+        set -e
+
+        COMMAND="${{ inputs.command }}"
+
+        if [ "$COMMAND" = "verify-session" ]; then
+          ARGS="${{ inputs.session-file }}"
+          if [ "${{ inputs.model }}" != "" ]; then
+            ARGS="$ARGS --model ${{ inputs.model }}"
+          fi
+          if [ "${{ inputs.strict }}" = "true" ]; then
+            ARGS="$ARGS --strict"
+          fi
+          if detinfer verify-session $ARGS; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+        elif [ "$COMMAND" = "chat" ]; then
+          ARGS="${{ inputs.model }} --seed ${{ inputs.seed }}"
+          if [ "${{ inputs.prompt }}" != "" ]; then
+            ARGS="$ARGS --prompt \"${{ inputs.prompt }}\""
+          fi
+          if [ "${{ inputs.export }}" != "" ]; then
+            ARGS="$ARGS --export ${{ inputs.export }}"
+          fi
+          eval detinfer chat $ARGS
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+        elif [ "$COMMAND" = "verify" ]; then
+          detinfer verify ${{ inputs.model }} --seed ${{ inputs.seed }}
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+        else
+          echo "Unknown command: $COMMAND"
+          exit 1
+        fi

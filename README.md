@@ -59,6 +59,7 @@ detinfer diff run_a.json run_b.json  # Token-level comparison of two runs
 # Proofs
 detinfer export <model> -o proof.json   # Export proof for cross-GPU verification
 detinfer cross-verify proof.json        # Verify a proof from another machine
+detinfer verify-session session.json    # Verify session as execution proof
 
 # Info
 detinfer info                   # Show your GPU and environment details
@@ -252,6 +253,10 @@ detinfer replay session.json --strict   # Step-by-step verification
 
 # Token-level comparison of two sessions
 detinfer diff run_a.json run_b.json
+
+# Verify a session export as deterministic execution proof
+detinfer verify-session session.json
+detinfer verify-session session.json --strict
 
 # Scan model for non-deterministic ops (Dropout, Flash Attention, etc.)
 detinfer scan <model>
@@ -501,6 +506,39 @@ detinfer.checkpoint_hash(model)         # Hash model weights (for training)
 |----------|-------------|
 | `replay_session(trace_path)` | Re-run session, verify token-by-token |
 | `diff_sessions(path_a, path_b)` | Compare two traces, find first mismatch |
+
+---
+
+## GitHub Action
+
+Other teams can add detinfer to their CI to auto-verify model outputs haven't changed:
+
+```yaml
+# .github/workflows/determinism.yml
+name: Verify Determinism
+on: [push]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verify a saved session is still reproducible
+      - uses: xailong-6969/detinfer@v2-enforcement
+        with:
+          command: verify-session
+          session-file: baseline.json
+          strict: true
+
+      # Or generate + export a new session for comparison
+      - uses: xailong-6969/detinfer@v2-enforcement
+        with:
+          command: chat
+          model: gpt2
+          prompt: "What is 2+2?"
+          export: output.json
+```
 
 ---
 
