@@ -15,7 +15,7 @@ ML models give **different outputs every time you run them** — even with the e
 
 This breaks everything that requires **verifiable computation**: decentralized AI networks, reproducible research, CI/CD for ML, audit trails.
 
-**detinfer Fixes this.** One import, one function call.
+**detinfer fixes this.** One import, one function call.
 
 ```python
 import detinfer
@@ -26,76 +26,26 @@ detinfer.enforce()  # Everything is now deterministic.
 
 ## Installation
 
-### Via PyPI (easiest)
-
 ```bash
-# Create and activate a virtual environment (required on Debian/Ubuntu)
-python3 -m venv venv
-source venv/bin/activate
-
-# With HuggingFace model support (recommended)
-pip install "detinfer[transformers]"
-
-# Core only (if you already have your own model)
 pip install detinfer
 ```
 
-Then use the CLI directly:
+With HuggingFace model support (recommended):
+
 ```bash
-# Replace <model> with any HuggingFace model, e.g. gpt2, Qwen/Qwen2.5-0.5B-Instruct, etc.
-
-# Inference
-detinfer run <model>            # Interactive inference — type prompts, get deterministic output
-detinfer verify <model>         # Verify determinism — runs 5 times, compares hashes
-detinfer benchmark <model>      # Full stress test with 36 prompts across 8 categories
-detinfer compare <model>        # Side-by-side: without detinfer vs with detinfer
-
-# Agent (NEW in v0.3.0)
-detinfer chat <model>           # Multi-turn deterministic chat agent
-detinfer chat <model> --prompt "What is 2+2?"  # Non-interactive (for CI/scripts)
-detinfer replay session.json    # Replay and verify a saved session
-detinfer diff run_a.json run_b.json  # Token-level comparison of two runs
-
-# Proofs
-detinfer export <model> -o proof.json   # Export proof for cross-GPU verification
-detinfer cross-verify proof.json        # Verify a proof from another machine
-detinfer verify-session session.json    # Verify session as execution proof
-
-# Info
-detinfer info                   # Show your GPU and environment details
+pip install "detinfer[transformers]"
 ```
 
-### Via Git (for the interactive menu)
+With INT8 quantization (experimental):
 
 ```bash
-git clone https://github.com/xailong-6969/detinfer.git
-cd detinfer
-bash run_detinfer.sh
+pip install "detinfer[quantized]"
 ```
 
-The script automatically:
-1. Creates a virtual environment
-2. Installs detinfer + all dependencies
-3. Detects your GPU/CPU
-4. Launches the interactive menu
-
-### Manual Install from Source
+Update to latest version:
 
 ```bash
-# Clone
-git clone https://github.com/xailong-6969/detinfer.git
-cd detinfer
-
-# Create and activate a virtual environment (required on Debian/Ubuntu)
-python3 -m venv venv
-source venv/bin/activate   # Linux/Mac
-# venv\Scripts\activate    # Windows
-
-# Recommended — includes HuggingFace model support (load any model by name)
-pip install -e ".[transformers]"
-
-# For contributors — includes pytest for running the test suite
-pip install -e ".[dev]"
+pip install --upgrade detinfer
 ```
 
 ### Requirements
@@ -104,19 +54,46 @@ pip install -e ".[dev]"
 - PyTorch 2.0+
 - Any NVIDIA GPU (recommended) or CPU
 
----
+### Quick Reference — All CLI Commands
+
+```bash
+# Replace <model> with any HuggingFace model, e.g. gpt2, Qwen/Qwen2.5-0.5B-Instruct
+
+# ── Inference ──
+detinfer run <model>                                # Interactive deterministic inference
+detinfer run <model> --seed 42 --max-tokens 512     # Custom seed and token limit
+
+# ── Chat Agent ──
+detinfer chat <model>                               # Multi-turn deterministic chat
+detinfer chat <model> --prompt "What is 2+2?"       # Non-interactive (single question)
+detinfer chat <model> --stream                      # Stream tokens in real-time
+detinfer chat <model> --system "You are a tutor"    # Set system prompt
+detinfer chat <model> --export session.json         # Export session trace
+detinfer chat <model> --quantize int8               # Experimental INT8 mode
+detinfer chat <model> --verbose-trace               # Record top-k tokens per step
+
+# ── Verify & Replay ──
+detinfer verify <model>                             # Run 5 times, compare hashes
+detinfer replay session.json                        # Replay a saved session
+detinfer replay session.json --strict               # Step-by-step verification
+detinfer verify-session session.json                # Verify session as execution proof
+detinfer verify-session session.json --strict       # Strict proof verification
+detinfer diff run_a.json run_b.json                 # Token-level comparison of two runs
+
+# ── Analysis ──
+detinfer scan <model>                               # Scan for non-deterministic ops
+detinfer compare <model>                            # Before vs after detinfer comparison
+detinfer benchmark <model>                          # Full benchmark (auto-scales)
+
+# ── Cross-GPU Proofs ──
+detinfer export <model> -o proof.json               # Export proof for cross-GPU verification
+detinfer cross-verify proof.json                    # Verify proof from another machine
+
+# ── Info ──
+detinfer info                                       # Show GPU and environment details
+```
 
 ## Getting Started
-
-### If you installed via `run_detinfer.sh`
-
-The interactive menu is already open — select an option and follow the prompts. The script handles everything for you.
-
-### If you installed via `pip install`
-
-*(Note: On modern Debian/Ubuntu systems, remember to activate your virtual environment before running the tool, e.g., `source venv/bin/activate`)*
-
-**From Python (in your own code):**
 
 ```python
 import detinfer
@@ -166,15 +143,13 @@ print(result.canonical_hash)  # SHA-256 hash — identical across GPUs
 **For large models across multiple GPUs:**
 
 ```python
-# Models too large for a single GPU — automatically splits across all available GPUs
 engine = DeterministicEngine(seed=42)
 engine.load("<model>", device_map="auto")
 
-# Everything else works the same
 result = engine.run("Write hello world in Python")
 ```
 
-### 3. Deterministic Chat Agent (NEW in v0.3.0)
+### 3. Deterministic Chat Agent
 
 ```python
 from detinfer import DeterministicAgent
@@ -187,11 +162,16 @@ print(response)  # Always the same answer
 response = agent.chat("Explain more")
 print(response)  # Always the same follow-up
 
+# With system prompt
+agent = DeterministicAgent("Qwen/Qwen2.5-0.5B-Instruct", seed=42, system_prompt="You are a math tutor")
+response = agent.chat("What is calculus?")
+
+# Streaming output (tokens appear one by one)
+for chunk in agent.chat_stream("Explain gravity"):
+    print(chunk, end="", flush=True)
+
 # Export full session trace (token-by-token proof)
 agent.export_session("session.json")
-
-# Replay on another machine to verify
-# detinfer replay session.json
 ```
 
 ### 4. Verify Determinism
@@ -223,170 +203,17 @@ for step, batch in enumerate(dataloader):
 
 ### 6. Cross-GPU Proof Verification
 
-Prove that two different GPUs produce the same output — see the [Cross-GPU Verification Guide](#cross-gpu-verification-guide) below for the full step-by-step walkthrough.
-
----
-
-## CLI
-
-detinfer includes a full command-line interface:
+Prove that two different GPUs produce the same output:
 
 ```bash
-# Replace <model> with any HuggingFace model name, e.g.:
-#   Qwen/Qwen2.5-0.5B-Instruct
-#   meta-llama/Llama-3-8B
-#   mistralai/Mistral-7B-v0.1
-#   gpt2
-
-# Interactive deterministic inference
-detinfer run <model>
-
-# Deterministic multi-turn chat agent (NEW in v0.3.0)
-detinfer chat <model>
-detinfer chat <model> --prompt "Hello"  # Non-interactive mode
-detinfer chat <model> --export session.json
-detinfer chat <model> --quantize int8   # Experimental INT8 mode
-
-# Replay and verify a saved chat session
-detinfer replay session.json
-detinfer replay session.json --strict   # Step-by-step verification
-
-# Token-level comparison of two sessions
-detinfer diff run_a.json run_b.json
-
-# Verify a session export as deterministic execution proof
-detinfer verify-session session.json
-detinfer verify-session session.json --strict
-
-# Scan model for non-deterministic ops (Dropout, Flash Attention, etc.)
-detinfer scan <model>
-
-# Verify determinism (run 5 times, compare hashes)
-detinfer verify <model>
-
-# Before vs after detinfer comparison
-detinfer compare <model>
-
-# Full benchmark (auto-scales based on model size)
-detinfer benchmark <model>
-
-# Export inference proof to JSON
+# Machine A: export proof
 detinfer export <model> -o proof.json
 
-# Verify a proof from another machine
-detinfer cross-verify proof.json
+# Transfer proof.json to Machine B (scp, upload, etc.)
 
-# Show environment information
-detinfer info
-```
-
-### Interactive Menu (run_determl.sh)
-
-```
->> What would you like to do?
-   1) run          - Interactive deterministic inference
-   2) scan         - Scan model for non-deterministic ops
-   3) verify       - Verify model produces deterministic output
-   4) compare      - Before vs after detinfer comparison
-   5) benchmark    - Full determinism benchmark (auto-scales)
-   6) export       - Export inference proof (for cross-GPU verify)
-   7) cross-verify - Verify a proof from another machine
-   8) info         - Show environment information
-   9) exit         - Exit detinfer
-```
-
----
-
-## Features
-
-### Auto-Scaling Benchmark
-
-Tests determinism across 8 categories of prompts:
-
-| Tier | Category | What it tests |
-|------|----------|--------------|
-| 1 | Sanity | Basic questions (baseline check) |
-| 2 | Long output | 200+ token generations (many CUDA ops) |
-| 3 | Uncertain | Creative prompts (model has low confidence) |
-| 4 | Complex code | Merge sort, LRU cache (deep computation) |
-| 5 | Reasoning | Logic puzzles, step-by-step (deep attention) |
-| 6 | Deep context | Long code + passage analysis |
-| 7 | Adversarial | FizzBuzz, pangrams (designed to break determinism) |
-| 8 | Edge cases | Unicode, empty, special characters |
-
-Auto-scales based on model size:
-- Small models (<3B): 20 prompts × 5 runs = 100 total
-- Medium models (3-13B): 10 prompts × 3 runs = 30 total
-- Large models (13B+): 5 prompts × 2 runs = 10 total
-
-### Before vs After Comparison
-
-```bash
-detinfer compare <model>
-```
-
-Runs the model first **without** detinfer (raw PyTorch) then **with** detinfer, showing hash differences side by side.
-
-### Cross-GPU Verification Guide
-
-This proves that two different machines (with different GPUs) produce the exact same output.
-
-**How it works:**
-
-```
-Machine A                          Machine B
-─────────                          ─────────
-Runs inference                     
-  → gets hash abc123               
-  → saves to proof.json            
-                                   
-        ──── transfer proof.json ────→
-                                   
-                                   Reads proof.json (Machine A's hash)
-                                   Runs the SAME inference locally
-                                     → gets hash abc123
-                                   Compares: abc123 == abc123? ✓ MATCH
-```
-
-Only **one** `proof.json` is created. Machine B does not create its own — it re-runs the inference and compares its result with Machine A's hash automatically.
-
-**What you need:**
-- Two machines with GPUs (e.g., a cloud GPU instance + another server, or any two machines)
-- Both machines must have detinfer installed
-- Both machines must use the same model
-
-**Step 1: Install detinfer on both machines**
-
-```bash
-# Run this on both Machine A and Machine B:
-git clone https://github.com/xailong-6969/detinfer.git
-cd detinfer
-pip install -e ".[transformers]"
-```
-
-**Step 2: Export a proof on Machine A**
-
-```bash
-detinfer export <model> -o proof.json
-
-# This will:
-#   1. Load the model
-#   2. Run inference with a test prompt
-#   3. Save the canonical hash, environment info, and output to proof.json
-```
-
-**Step 3: Transfer proof.json to Machine B**
-
-Copy `proof.json` from Machine A to Machine B however you prefer — `scp`, file upload, copy-paste, etc.
-
-**Step 4: Verify on Machine B**
-
-```bash
-cd detinfer
+# Machine B: verify
 detinfer cross-verify proof.json
 ```
-
-**What you'll see:**
 
 ```
   CROSS-GPU VERIFICATION RESULT
@@ -405,7 +232,141 @@ detinfer cross-verify proof.json
   ✓ VERIFIED — Deterministic execution confirmed across GPUs!
 ```
 
-If both canonical hashes match → the library works. Same model + same input = same output, regardless of hardware.
+---
+
+## CLI Reference
+
+### `detinfer run` — Interactive inference
+
+```bash
+detinfer run <model>
+detinfer run <model> --seed 42 --max-tokens 256
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--seed` | 42 | Random seed |
+| `--max-tokens` | 256 | Max tokens to generate |
+| `--device` | auto | Device (cpu, cuda, auto) |
+
+### `detinfer chat` — Deterministic chat agent
+
+```bash
+detinfer chat <model>
+detinfer chat <model> --prompt "What is 2+2?"
+detinfer chat <model> --stream
+detinfer chat <model> --system "You are a math tutor"
+detinfer chat <model> --export session.json
+detinfer chat <model> --quantize int8
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--prompt` | — | Non-interactive mode (single question) |
+| `--stream` | off | Stream tokens as they are generated |
+| `--system` | — | System prompt (e.g., "You are a math tutor") |
+| `--seed` | 42 | Random seed |
+| `--max-tokens` | 256 | Max tokens per turn |
+| `--device` | auto | Device (cpu, cuda, auto) |
+| `--export` | — | Export session trace to JSON |
+| `--quantize` | — | Quantization mode (`int8`, experimental) |
+| `--verbose-trace` | off | Record top-k tokens per step |
+
+### `detinfer verify` — Verify determinism
+
+```bash
+detinfer verify <model>
+detinfer verify <model> --runs 10
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--runs` | 5 | Number of runs to compare |
+| `--seed` | 42 | Random seed |
+
+### `detinfer replay` — Replay a saved session
+
+```bash
+detinfer replay session.json
+detinfer replay session.json --strict
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--strict` | off | Verify every generation step, not just final tokens |
+| `--model` | — | Override model (uses trace model if not set) |
+
+### `detinfer verify-session` — Verify session as execution proof
+
+```bash
+detinfer verify-session session.json
+detinfer verify-session session.json --strict
+```
+
+Shows model info, session hash, environment, re-runs all turns, and reports if it's a valid deterministic execution proof.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--strict` | off | Verify every generation step |
+| `--model` | — | Override model |
+
+### `detinfer diff` — Compare two sessions
+
+```bash
+detinfer diff run_a.json run_b.json
+```
+
+Token-level comparison of two session traces. Shows first mismatch.
+
+### `detinfer scan` — Scan for non-deterministic ops
+
+```bash
+detinfer scan <model>
+```
+
+Detects Dropout, Flash Attention, and other non-deterministic operations in the model.
+
+### `detinfer compare` — Before vs after comparison
+
+```bash
+detinfer compare <model>
+```
+
+Runs the model first **without** detinfer (raw PyTorch) then **with** detinfer, showing hash differences side by side.
+
+### `detinfer benchmark` — Full determinism benchmark
+
+```bash
+detinfer benchmark <model>
+```
+
+Tests determinism across 8 categories of prompts (auto-scales based on model size):
+
+| Tier | Category | What it tests |
+|------|----------|--------------|
+| 1 | Sanity | Basic questions (baseline check) |
+| 2 | Long output | 200+ token generations (many CUDA ops) |
+| 3 | Uncertain | Creative prompts (model has low confidence) |
+| 4 | Complex code | Merge sort, LRU cache (deep computation) |
+| 5 | Reasoning | Logic puzzles, step-by-step (deep attention) |
+| 6 | Deep context | Long code + passage analysis |
+| 7 | Adversarial | FizzBuzz, pangrams (designed to break determinism) |
+| 8 | Edge cases | Unicode, empty, special characters |
+
+### `detinfer export` / `detinfer cross-verify` — Cross-GPU proofs
+
+```bash
+detinfer export <model> -o proof.json
+detinfer cross-verify proof.json
+```
+
+### `detinfer info` — Environment information
+
+```bash
+detinfer info
+```
+
+Shows GPU, PyTorch version, CUDA version, and determinism flags.
 
 ---
 
@@ -430,7 +391,7 @@ detinfer addresses 7 sources of non-determinism:
 ```
 detinfer/
   __init__.py       # Top-level API: enforce(), status(), checkpoint_hash()
-  cli.py            # CLI entry point (12 commands)
+  cli.py            # CLI entry point (14 commands)
 
   inference/        # Deterministic inference library
     config.py       # Seed locking + deterministic flags
@@ -445,7 +406,7 @@ detinfer/
     wrapper.py      # Simple HuggingFace wrapper
     utils.py        # Hashing + env snapshots
 
-  agent/            # Deterministic agent system (NEW in v0.3.0)
+  agent/            # Deterministic agent system
     runtime.py      # DeterministicAgent — multi-turn chat
     trace.py        # Token-level trace recording + session schema
     replay.py       # Session replay verification + diff
@@ -471,9 +432,20 @@ detinfer.checkpoint_hash(model)         # Hash model weights (for training)
 |--------|-------------|
 | `DeterministicEngine(seed, precision, device)` | Create engine |
 | `.load(model_name)` | Load HuggingFace model, auto-fix ops |
+| `.load(model_name, quantize="int8")` | Load with INT8 quantization (experimental) |
 | `.run(prompt, max_new_tokens)` | Deterministic inference |
 | `.verify(prompt, num_runs)` | Run N times, compare hashes |
 | `.scan()` | Show enforcement report |
+
+### DeterministicAgent
+
+| Method | Description |
+|--------|-------------|
+| `DeterministicAgent(model, seed, system_prompt)` | Create agent |
+| `.chat(message)` | Send message, get deterministic response |
+| `.chat_stream(message)` | Stream tokens as they are generated |
+| `.export_session(path)` | Export full token trace to JSON |
+| `.get_session_hash()` | Get canonical session hash |
 
 ### Proof System
 
@@ -483,22 +455,6 @@ detinfer.checkpoint_hash(model)         # Hash model weights (for training)
 | `cross_verify(proof)` | Re-run locally, compare with proof |
 | `InferenceProof.save(path)` | Export proof to JSON |
 | `InferenceProof.load(path)` | Load proof from JSON |
-
-### Benchmark
-
-| Function | Description |
-|----------|-------------|
-| `run_benchmark(engine, config)` | Run full benchmark suite |
-| `BenchmarkConfig.from_depth(depth, param_b)` | Auto-scale by model size |
-
-### DeterministicAgent (NEW in v0.3.0)
-
-| Method | Description |
-|--------|-------------|
-| `DeterministicAgent(model, seed)` | Create agent |
-| `.chat(message)` | Send message, get deterministic response |
-| `.export_session(path)` | Export full token trace to JSON |
-| `.get_session_hash()` | Get canonical session hash |
 
 ### Replay & Diff
 
@@ -511,7 +467,7 @@ detinfer.checkpoint_hash(model)         # Hash model weights (for training)
 
 ## GitHub Action
 
-Other teams can add detinfer to their CI to auto-verify model outputs haven't changed:
+Add determinism verification to your CI pipeline:
 
 ```yaml
 # .github/workflows/determinism.yml
@@ -531,7 +487,7 @@ jobs:
           session-file: baseline.json
           strict: true
 
-      # Or generate + export a new session for comparison
+      # Or generate + export a new session
       - uses: xailong-6969/detinfer@v2-enforcement
         with:
           command: chat
@@ -542,14 +498,7 @@ jobs:
 
 ---
 
-## Running Tests
-
-```bash
-pip install -e ".[dev]"
-pytest tests/ -v
-```
-
-### Supported Matrix
+## Supported Matrix
 
 | Feature | Status | Notes |
 |---|---|---|
@@ -574,12 +523,19 @@ pytest tests/ -v
 | AMD GPUs (ROCm) | Untested | |
 | Apple Silicon (MPS) | Untested | |
 
-> For the full technical specification of what "deterministic" means in detinfer — including exact hash definitions, proof format, and operating modes — see [docs/determinism-spec.md](docs/determinism-spec.md).
+> For the full technical specification — see [docs/determinism-spec.md](docs/determinism-spec.md).
+
+---
+
+## Running Tests
+
+```bash
+pip install "detinfer[dev]"
+pytest tests/ -v
+```
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-
