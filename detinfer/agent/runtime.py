@@ -216,6 +216,89 @@ class DeterministicAgent:
 
         return response
 
+    def chat_stream(self, message: str):
+        """Send a message and yield tokens as they are generated.
+
+        Same deterministic guarantees as chat(), but yields decoded
+        text chunks in real-time for streaming display.
+
+        Args:
+            message: User message.
+
+        Yields:
+            str: Decoded text chunk for each generated token.
+
+        After iteration completes, the full response is recorded in
+        the session trace (identical to what chat() would produce).
+        """
+        self._turn_count += 1
+
+        # Add user message
+        self._conversation_history.append({"role": "user", "content": message})
+        self.session.add_message("user", message)
+
+        # Re-seed for strict reproducibility
+        self.engine.config.apply()
+
+        # Render prompt and tokenize
+        rendered_prompt = self._render_prompt()
+        input_device = self.engine._get_input_device()
+        inputs = self.engine.tokenizer(
+            rendered_prompt, return_tensors="pt"
+        ).to(input_device)
+        input_token_ids = inputs["input_ids"][0].tolist()
+
+        # Create generation trace
+        gen_trace = GenerationTrace(
+            turn=self._turn_count,
+            rendered_prompt=rendered_prompt,
+            input_tokens=input_token_ids,
+        )
+
+        tokenizer = self.engine.tokenizer
+        eos_id = tokenizer.eos_token_id
+        generated_ids = []
+        current_ids = inputs["input_ids"]
+
+        # Token-by-token generation with streaming
+        with torch.no_grad(), self.engine.enforcer.deterministic_context():
+            for step in range(self.max_new_tokens):
+                outputs = self.engine.model(current_ids)
+                next_logits = outputs.logits[0, -1, :]
+
+                # Deterministic argmax with tie-breaking
+                next_token = deterministic_argmax(next_logits)
+                token_id = next_token.item()
+
+                # Record trace step
+                gen_trace.add_step(step=step, chosen_token=token_id)
+                generated_ids.append(token_id)
+
+                # Decode just this token and yield
+                chunk = tokenizer.decode(
+                    [token_id], skip_special_tokens=True
+                )
+                if chunk:
+                    yield chunk
+
+                # Stop on EOS
+                if token_id == eos_id:
+                    break
+
+                # Append token for next iteration
+                next_token_tensor = next_token.unsqueeze(0).unsqueeze(0).to(input_device)
+                current_ids = torch.cat([current_ids, next_token_tensor], dim=1)
+
+        # Finalize trace
+        gen_trace.output_tokens = generated_ids
+        gen_trace.finalize(eos_token_id=eos_id)
+        self.session.add_generation(gen_trace)
+
+        # Decode full response
+        response = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        self._conversation_history.append({"role": "assistant", "content": response})
+        self.session.add_message("assistant", response)
+
     def _render_prompt(self) -> str:
         """Render the full conversation into a prompt string.
 

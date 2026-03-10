@@ -286,9 +286,17 @@ def cmd_chat(args: argparse.Namespace) -> None:
 
     # Non-interactive mode
     if args.prompt:
-        response = agent.chat(args.prompt)
-        print(f"User:      {args.prompt}")
-        print(f"Assistant: {response}")
+        if args.stream:
+            import sys
+            print(f"User:      {args.prompt}")
+            print(f"Assistant: ", end="", flush=True)
+            for chunk in agent.chat_stream(args.prompt):
+                print(chunk, end="", flush=True)
+            print()
+        else:
+            response = agent.chat(args.prompt)
+            print(f"User:      {args.prompt}")
+            print(f"Assistant: {response}")
         print(f"\nSession hash: {agent.get_session_hash()}")
         if args.export:
             session_hash = agent.export_session(args.export)
@@ -303,8 +311,15 @@ def cmd_chat(args: argparse.Namespace) -> None:
             if not user_input:
                 continue
 
-            response = agent.chat(user_input)
-            print(f"Assistant: {response}\n")
+            if args.stream:
+                import sys
+                print("Assistant: ", end="", flush=True)
+                for chunk in agent.chat_stream(user_input):
+                    print(chunk, end="", flush=True)
+                print("\n")
+            else:
+                response = agent.chat(user_input)
+                print(f"Assistant: {response}\n")
 
     except (KeyboardInterrupt, EOFError):
         print(f"\n\nSession: {agent.turn_count} turns")
@@ -422,6 +437,7 @@ def main() -> None:
     chat_parser.add_argument("--system", default=None, help="System prompt (e.g., 'You are a math tutor')")
     chat_parser.add_argument("--quantize", default=None, choices=["int8"], help="Quantization mode (experimental)")
     chat_parser.add_argument("--verbose-trace", action="store_true", help="Record top-k tokens per step")
+    chat_parser.add_argument("--stream", action="store_true", help="Stream tokens as they are generated")
 
     # -- detinfer replay <session.json> --
     replay_parser = subparsers.add_parser("replay", help="Replay and verify a saved session")
