@@ -215,8 +215,8 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 current_ids = torch.tensor([[token_id]], device=device)
 
         text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-        all_ids = torch.cat([inputs["input_ids"][0], torch.tensor(generated_ids)])
-        h = hashlib.sha256(all_ids.cpu().numpy().tobytes()).hexdigest()
+        all_ids = torch.cat([inputs["input_ids"][0].cpu(), torch.tensor(generated_ids)])
+        h = hashlib.sha256(all_ids.numpy().tobytes()).hexdigest()
         raw_hashes.append(h)
         raw_texts.append(text)
         match = "" if i == 0 else (" ✓ same" if h == raw_hashes[0] else " ✗ DIFFERENT")
@@ -241,7 +241,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     print("=" * 60)
 
     from detinfer.inference.engine import DeterministicEngine
-    from detinfer.inference.canonicalizer import deterministic_argmax
+    from detinfer.agent.runtime import deterministic_argmax
     from detinfer.inference.utils import hash_string
 
     engine = DeterministicEngine(
@@ -358,7 +358,7 @@ def _run_stream(engine, prompt: str, max_new_tokens: int) -> None:
     import sys
     import torch
     from detinfer.inference.utils import hash_string
-    from detinfer.inference.canonicalizer import deterministic_argmax
+    from detinfer.agent.runtime import deterministic_argmax
 
     engine.config.apply()
 
