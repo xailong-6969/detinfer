@@ -132,8 +132,7 @@ def cmd_cross_verify(args: argparse.Namespace) -> None:
 
 def cmd_compare(args: argparse.Namespace) -> None:
     """Compare model output with and without detinfer enforcement."""
-    import random
-    import numpy as np
+    import time
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     prompt = args.prompt or "What is 2 + 2? Answer with just the number."
@@ -150,6 +149,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     # ── Phase 1: WITHOUT detinfer ──
     print("\n" + "=" * 60)
     print("  WITHOUT detinfer (raw PyTorch, do_sample=True, temp=0.7)")
+    print("  Each run asks the SAME question but gets DIFFERENT answers")
     print("=" * 60)
 
     print("Loading model (raw)...")
@@ -161,39 +161,73 @@ def cmd_compare(args: argparse.Namespace) -> None:
     model.to(device)
     model.eval()
 
+    # Format prompt with chat template if available
+    formatted_prompt = prompt
+    if hasattr(tokenizer, 'chat_template') and tokenizer.chat_template:
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            formatted_prompt = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            pass
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     raw_hashes = []
     raw_texts = []
+    eos_id = tokenizer.eos_token_id
+
     for i in range(num_runs):
-        # Do NOT lock seeds — let it be natural (sampling = real-world usage)
-        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        print(f"\n  ── Run {i+1}/{num_runs} ──")
+        print(f"  Prompt:    {prompt}")
+        print(f"  Response:  ", end="", flush=True)
+
+        # Token-by-token generation with sampling (live streaming)
+        inputs = tokenizer(formatted_prompt, return_tensors="pt").to(device)
+        current_ids = inputs["input_ids"]
+        generated_ids = []
+        past_kv = None
+
         with torch.no_grad():
-            output = model.generate(
-                **inputs,
-                max_new_tokens=50,
-                do_sample=True,
-                temperature=0.7,
-            )
-        prompt_length = inputs["input_ids"].shape[1]
-        generated_ids = output[0, prompt_length:]
-        text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        output_bytes = output.cpu().numpy().tobytes()
-        h = hashlib.sha256(output_bytes).hexdigest()
+            for step in range(50):
+                outputs = model(current_ids, past_key_values=past_kv, use_cache=True)
+                logits = outputs.logits[0, -1, :]
+                past_kv = outputs.past_key_values
+
+                # Apply temperature and sample (non-deterministic on purpose)
+                scaled = logits / 0.7
+                probs = torch.softmax(scaled, dim=-1)
+                token_id = torch.multinomial(probs, num_samples=1).item()
+
+                generated_ids.append(token_id)
+
+                # Stream token live
+                chunk = tokenizer.decode([token_id], skip_special_tokens=True)
+                if chunk:
+                    print(chunk, end="", flush=True)
+                    time.sleep(0.02)
+
+                if token_id == eos_id:
+                    break
+
+                current_ids = torch.tensor([[token_id]], device=device)
+
+        text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        all_ids = torch.cat([inputs["input_ids"][0], torch.tensor(generated_ids)])
+        h = hashlib.sha256(all_ids.cpu().numpy().tobytes()).hexdigest()
         raw_hashes.append(h)
         raw_texts.append(text)
         match = "" if i == 0 else (" ✓ same" if h == raw_hashes[0] else " ✗ DIFFERENT")
-        print(f"  Run {i+1}: ", end="", flush=True)
-        # Stream the text character by character
-        for ch in text:
-            print(ch, end="", flush=True)
-            import time; time.sleep(0.01)
-        print(f"\n          {h[:32]}...{match}")
+        print(f"\n  Hash:      {h}{match}")
 
     unique_raw = len(set(raw_hashes))
     if unique_raw == 1:
         print(f"\n  Result: All {num_runs} hashes match (got lucky — sampling can still vary)")
     else:
         print(f"\n  Result: NON-DETERMINISTIC — {unique_raw} different hashes across {num_runs} runs!")
-        print(f"  (This is expected: do_sample=True with temperature=0.7)")
+        print(f"  (Same question every time, but answers vary due to random sampling)")
 
     # Cleanup raw model
     del model, tokenizer
@@ -202,10 +236,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
     # ── Phase 2: WITH detinfer ──
     print("\n" + "=" * 60)
-    print("  WITH detinfer (enforcement ON)")
+    print("  WITH detinfer (enforcement ON, greedy + seed locked)")
+    print("  Same question, IDENTICAL answer every time")
     print("=" * 60)
 
     from detinfer.inference.engine import DeterministicEngine
+    from detinfer.inference.canonicalizer import deterministic_argmax
+    from detinfer.inference.utils import hash_string
 
     engine = DeterministicEngine(
         seed=args.seed,
@@ -215,18 +252,59 @@ def cmd_compare(args: argparse.Namespace) -> None:
     report = engine.load(args.model)
     print(f"\n{report}\n")
 
+    det_tokenizer = engine.tokenizer
+    det_eos_id = det_tokenizer.eos_token_id
+    input_device = engine._get_input_device()
+
+    # Format prompt
+    det_formatted = prompt
+    if hasattr(det_tokenizer, 'chat_template') and det_tokenizer.chat_template:
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            det_formatted = det_tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            pass
+
     detinfer_hashes = []
     for i in range(num_runs):
-        result = engine.run(prompt, max_new_tokens=50)
-        h = result.canonical_hash
+        print(f"\n  ── Run {i+1}/{num_runs} ──")
+        print(f"  Prompt:    {prompt}")
+        print(f"  Response:  ", end="", flush=True)
+
+        engine.config.apply()
+        inputs = det_tokenizer(det_formatted, return_tensors="pt").to(input_device)
+        current_ids = inputs["input_ids"]
+        generated_ids = []
+        past_kv = None
+
+        with torch.no_grad(), engine.enforcer.deterministic_context():
+            for step in range(50):
+                outputs = engine.model(
+                    current_ids, past_key_values=past_kv, use_cache=True,
+                )
+                logits = outputs.logits[0, -1, :]
+                past_kv = outputs.past_key_values
+
+                token_id = deterministic_argmax(logits)
+                generated_ids.append(token_id)
+
+                chunk = det_tokenizer.decode([token_id], skip_special_tokens=True)
+                if chunk:
+                    print(chunk, end="", flush=True)
+                    time.sleep(0.02)
+
+                if token_id == det_eos_id:
+                    break
+
+                current_ids = torch.tensor([[token_id]], device=input_device)
+
+        text = det_tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        h = hash_string(text)
         detinfer_hashes.append(h)
         match = "" if i == 0 else (" ✓ same" if h == detinfer_hashes[0] else " ✗ DIFFERENT")
-        print(f"  Run {i+1}: ", end="", flush=True)
-        # Stream the text character by character
-        for ch in (result.text or ""):
-            print(ch, end="", flush=True)
-            import time; time.sleep(0.01)
-        print(f"\n          {h[:32]}...{match}")
+        print(f"\n  Hash:      {h}{match}")
 
     unique_detinfer = len(set(detinfer_hashes))
     if unique_detinfer == 1:
