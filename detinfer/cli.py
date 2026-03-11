@@ -149,7 +149,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
     # ── Phase 1: WITHOUT detinfer ──
     print("\n" + "=" * 60)
-    print("  WITHOUT detinfer (raw PyTorch, no enforcement)")
+    print("  WITHOUT detinfer (raw PyTorch, do_sample=True, temp=0.7)")
     print("=" * 60)
 
     print("Loading model (raw)...")
@@ -164,13 +164,14 @@ def cmd_compare(args: argparse.Namespace) -> None:
     raw_hashes = []
     raw_texts = []
     for i in range(num_runs):
-        # Do NOT lock seeds — let it be natural
+        # Do NOT lock seeds — let it be natural (sampling = real-world usage)
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
         with torch.no_grad():
             output = model.generate(
                 **inputs,
                 max_new_tokens=50,
-                do_sample=False,
+                do_sample=True,
+                temperature=0.7,
             )
         output_bytes = output.cpu().numpy().tobytes()
         h = hashlib.sha256(output_bytes).hexdigest()
@@ -182,11 +183,10 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
     unique_raw = len(set(raw_hashes))
     if unique_raw == 1:
-        print(f"\n  Result: All {num_runs} hashes match")
-        print(f"  (Greedy decoding on {device.upper()} happens to be stable,")
-        print(f"   but internal float values may still drift across different hardware)")
+        print(f"\n  Result: All {num_runs} hashes match (got lucky — sampling can still vary)")
     else:
-        print(f"\n  Result: NON-DETERMINISTIC — {unique_raw} different hashes!")
+        print(f"\n  Result: NON-DETERMINISTIC — {unique_raw} different hashes across {num_runs} runs!")
+        print(f"  (This is expected: do_sample=True with temperature=0.7)")
 
     # Cleanup raw model
     del model, tokenizer

@@ -190,11 +190,16 @@ class DeterministicAgent:
         current_ids = inputs["input_ids"]
         verbose = self.trace_mode == "topk"
 
-        # Token-by-token generation with deterministic argmax
+        # Token-by-token generation with deterministic argmax + KV cache
+        past_key_values = None
         with torch.no_grad(), self.engine.enforcer.deterministic_context():
             for step in range(self.max_new_tokens):
-                outputs = self.engine.model(current_ids)
+                outputs = self.engine.model(
+                    current_ids, past_key_values=past_key_values,
+                    use_cache=True,
+                )
                 next_logits = outputs.logits[0, -1, :]
+                past_key_values = outputs.past_key_values
 
                 # Deterministic argmax with stable tie-breaking
                 token_id = deterministic_argmax(next_logits)
@@ -220,9 +225,8 @@ class DeterministicAgent:
                 if token_id == eos_id:
                     break
 
-                # Append token for next iteration
-                next_token_tensor = torch.tensor([[token_id]], device=input_device)
-                current_ids = torch.cat([current_ids, next_token_tensor], dim=1)
+                # Next iteration: only feed the new token (KV cache has the rest)
+                current_ids = torch.tensor([[token_id]], device=input_device)
 
         # Set output tokens and finalize
         gen_trace.output_tokens = generated_ids
@@ -296,11 +300,16 @@ class DeterministicAgent:
         current_ids = inputs["input_ids"]
         verbose = self.trace_mode == "topk"
 
-        # Token-by-token generation with streaming
+        # Token-by-token generation with streaming + KV cache
+        past_key_values = None
         with torch.no_grad(), self.engine.enforcer.deterministic_context():
             for step in range(self.max_new_tokens):
-                outputs = self.engine.model(current_ids)
+                outputs = self.engine.model(
+                    current_ids, past_key_values=past_key_values,
+                    use_cache=True,
+                )
                 next_logits = outputs.logits[0, -1, :]
+                past_key_values = outputs.past_key_values
 
                 # Deterministic argmax with tie-breaking
                 token_id = deterministic_argmax(next_logits)
@@ -334,9 +343,8 @@ class DeterministicAgent:
                 if token_id == eos_id:
                     break
 
-                # Append token for next iteration
-                next_token_tensor = torch.tensor([[token_id]], device=input_device)
-                current_ids = torch.cat([current_ids, next_token_tensor], dim=1)
+                # Next iteration: only feed the new token (KV cache has the rest)
+                current_ids = torch.tensor([[token_id]], device=input_device)
 
         # Finalize trace
         gen_trace.output_tokens = generated_ids
