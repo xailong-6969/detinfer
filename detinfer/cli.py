@@ -157,7 +157,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
-        dtype=torch.float16 if device == "cuda" else torch.float32,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
     )
     model.to(device)
     model.eval()
@@ -221,7 +221,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         raw_hashes.append(h)
         raw_texts.append(text)
         match = "" if i == 0 else (" ✓ same" if h == raw_hashes[0] else " ✗ DIFFERENT")
-        print(f"\n  Hash:      {h}{match}")
+        print(f"\n  Text hash: {h}{match}")
 
     unique_raw = len(set(raw_hashes))
     if unique_raw == 1:
@@ -268,7 +268,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         except Exception:
             pass
 
-    detinfer_hashes = []
+    detinfer_text_hashes = []
     for i in range(num_runs):
         print(f"\n  ── Run {i+1}/{num_runs} ──")
         print(f"  Prompt:    {prompt}")
@@ -288,7 +288,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 logits = outputs.logits[0, -1, :]
                 past_kv = outputs.past_key_values
 
-                token_id = deterministic_argmax(logits)
+                token_id, _ = deterministic_argmax(logits)
                 generated_ids.append(token_id)
 
                 chunk = det_tokenizer.decode([token_id], skip_special_tokens=True)
@@ -302,12 +302,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 current_ids = torch.tensor([[token_id]], device=input_device)
 
         text = det_tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-        h = hash_string(text)
-        detinfer_hashes.append(h)
-        match = "" if i == 0 else (" ✓ same" if h == detinfer_hashes[0] else " ✗ DIFFERENT")
-        print(f"\n  Hash:      {h}{match}")
+        text_hash = hash_string(text)
+        detinfer_text_hashes.append(text_hash)
+        match = "" if i == 0 else (" ✓ same" if text_hash == detinfer_text_hashes[0] else " ✗ DIFFERENT")
+        print(f"\n  Text hash: {text_hash}{match}")
 
-    unique_detinfer = len(set(detinfer_hashes))
+    unique_detinfer = len(set(detinfer_text_hashes))
     if unique_detinfer == 1:
         print(f"\n  Result: DETERMINISTIC — All {num_runs} hashes identical!")
     else:
@@ -320,7 +320,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     print(f"  Without detinfer: {unique_raw} unique hash(es) across {num_runs} runs")
     print(f"  With detinfer:    {unique_detinfer} unique hash(es) across {num_runs} runs")
     if unique_detinfer == 1:
-        print(f"\n  ✓ detinfer canonical hash: {detinfer_hashes[0]}")
+        print(f"\n  ✓ detinfer text hash: {detinfer_text_hashes[0]}")
         print(f"  ✓ Seed: {args.seed}")
         print(f"  ✓ This hash will be identical on any machine with the same model.")
     print()
@@ -393,7 +393,7 @@ def _run_stream(engine, prompt: str, max_new_tokens: int) -> None:
             next_logits = outputs.logits[0, -1, :]
             past_key_values = outputs.past_key_values
 
-            token_id = deterministic_argmax(next_logits)
+            token_id, _ = deterministic_argmax(next_logits)
             generated_ids.append(token_id)
 
             # Stream the token
@@ -746,7 +746,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 )
                 logits = outputs.logits[0, -1, :]
                 past_kv = outputs.past_key_values
-                token_id = deterministic_argmax(logits)
+                token_id, _ = deterministic_argmax(logits)
                 generated_ids.append(token_id)
                 if token_id == eos_id:
                     break
@@ -771,7 +771,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         "runs": num_runs,
         "matched": f"{matched}/{num_runs}",
         "first_mismatch": first_mismatch if first_mismatch else "none",
-        "canonical_hash": hashes[0],
+        "text_hash": hashes[0],
         "ok": all_match,
     }
 
@@ -792,7 +792,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     else:
         print(f"\n{'─' * 60}")
         print(f"\n  Response preview: {texts[0][:80]}{'...' if len(texts[0]) > 80 else ''}")
-        print(f"  Canonical hash:  {hashes[0]}")
+        print(f"  Text hash:       {hashes[0]}")
         print(f"  Seed:            {args.seed}")
         print()
         print("═" * 60)
@@ -1048,4 +1048,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

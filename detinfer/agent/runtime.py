@@ -726,12 +726,15 @@ class DeterministicAgent:
             result=result,
         ))
 
-        # Add tool result to conversation for context
+        # Add tool result to conversation for context.
+        # Keep content identical across live history and exported trace so replay
+        # can reconstruct prompts exactly.
+        tool_text = f"[Tool: {name}] Result: {result}"
         self._conversation_history.append({
-            "role": "user",
-            "content": f"[Tool: {name}] Result: {result}",
+            "role": "tool",
+            "content": tool_text,
         })
-        self.session.add_message("tool", f"[{name}] {result}")
+        self.session.add_message("tool", tool_text)
 
         return result
 

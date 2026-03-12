@@ -419,6 +419,7 @@ class SessionTrace:
                     chosen_token=step_data["chosen_token"],
                     top_tokens=step_data.get("top_tokens"),
                     top_scores=step_data.get("top_scores"),
+                    is_ambiguous=step_data.get("is_ambiguous", False),
                 ))
             session.generations.append(trace)
 

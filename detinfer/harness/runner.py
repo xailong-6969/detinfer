@@ -192,7 +192,6 @@ class HarnessRunner:
         # 4. Compute result
         final_output = responses[-1] if responses else ""
         turns_executed = len(responses)
-        session_hash = agent.get_session_hash()
 
         # Add task metadata to session trace
         # (stored in agent_steps as a checkpoint)
@@ -207,6 +206,7 @@ class HarnessRunner:
                 "harness_version": 1,
             },
         ))
+        session_hash = agent.get_session_hash()
 
         # 5. Export trace
         trace_path = ""
