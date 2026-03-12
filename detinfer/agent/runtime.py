@@ -38,22 +38,38 @@ from detinfer.agent.trace import (
 )
 
 
-def deterministic_argmax(logits: torch.Tensor) -> int:
-    """Deterministic argmax with stable tie-breaking.
+def deterministic_argmax(
+    logits: torch.Tensor, epsilon: float = 1e-6
+) -> tuple[int, bool]:
+    """Deterministic argmax with stable tie-breaking and ambiguity detection.
 
     When multiple tokens share the maximum logit value,
-    selects the smallest token ID. This guarantees identical
-    results across hardware.
+    selects the smallest token ID. Also detects near-ties
+    (top-2 within epsilon) and flags them as numerically ambiguous.
 
     Args:
         logits: 1D tensor of logit scores for each token.
+        epsilon: Threshold for near-tie detection. If the top-2
+            logits differ by less than this, the step is marked
+            as ambiguous.
 
     Returns:
-        Token ID of the selected token.
+        Tuple of (token_id, is_ambiguous). is_ambiguous is True
+        when the top-2 logits are within epsilon of each other.
     """
     max_val = torch.max(logits)
     candidates = torch.where(logits == max_val)[0]
-    return int(candidates.min().item())
+    token_id = int(candidates.min().item())
+
+    # Detect near-ties: is the gap between #1 and #2 within epsilon?
+    is_ambiguous = False
+    if logits.shape[0] > 1:
+        top2 = torch.topk(logits, min(2, logits.shape[0]))
+        if top2.values.shape[0] >= 2:
+            gap = abs(top2.values[0].item() - top2.values[1].item())
+            is_ambiguous = gap < epsilon
+
+    return token_id, is_ambiguous
 
 
 @dataclass
@@ -239,7 +255,7 @@ class DeterministicAgent:
                 past_key_values = outputs.past_key_values
 
                 # Deterministic argmax with stable tie-breaking
-                token_id = deterministic_argmax(next_logits)
+                token_id, is_ambiguous = deterministic_argmax(next_logits)
 
                 # Capture top-k for verbose trace
                 top_tokens = None
@@ -247,14 +263,18 @@ class DeterministicAgent:
                 if verbose:
                     k = min(10, next_logits.shape[0])
                     top_vals, top_ids = torch.topk(next_logits, k)
-                    top_tokens = top_ids.tolist()
-                    top_scores = [round(v, 6) for v in top_vals.tolist()]
+                    # Stable sort: by (-score, token_id) for cross-hardware consistency
+                    pairs = list(zip(top_vals.tolist(), top_ids.tolist()))
+                    pairs.sort(key=lambda p: (-p[0], p[1]))
+                    top_tokens = [p[1] for p in pairs]
+                    top_scores = [round(p[0], 6) for p in pairs]
 
                 gen_trace.add_step(
                     step=step,
                     chosen_token=token_id,
                     top_tokens=top_tokens,
                     top_scores=top_scores,
+                    is_ambiguous=is_ambiguous,
                 )
                 generated_ids.append(token_id)
 
@@ -350,7 +370,7 @@ class DeterministicAgent:
                 past_key_values = outputs.past_key_values
 
                 # Deterministic argmax with tie-breaking
-                token_id = deterministic_argmax(next_logits)
+                token_id, is_ambiguous = deterministic_argmax(next_logits)
 
                 # Capture top-k for verbose trace
                 top_tokens = None
@@ -358,8 +378,11 @@ class DeterministicAgent:
                 if verbose:
                     k = min(10, next_logits.shape[0])
                     top_vals, top_ids = torch.topk(next_logits, k)
-                    top_tokens = top_ids.tolist()
-                    top_scores = [round(v, 6) for v in top_vals.tolist()]
+                    # Stable sort: by (-score, token_id)
+                    pairs = list(zip(top_vals.tolist(), top_ids.tolist()))
+                    pairs.sort(key=lambda p: (-p[0], p[1]))
+                    top_tokens = [p[1] for p in pairs]
+                    top_scores = [round(p[0], 6) for p in pairs]
 
                 # Record trace step
                 gen_trace.add_step(
@@ -367,6 +390,7 @@ class DeterministicAgent:
                     chosen_token=token_id,
                     top_tokens=top_tokens,
                     top_scores=top_scores,
+                    is_ambiguous=is_ambiguous,
                 )
                 generated_ids.append(token_id)
 

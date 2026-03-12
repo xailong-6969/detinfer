@@ -43,17 +43,21 @@ class GenerationStep:
     """A single generation step in the trace.
 
     Minimal mode: only step + chosen_token.
-    Verbose mode: includes top_tokens and top_scores.
+    Standard mode: + is_ambiguous flag.
+    Verbose mode: + top_tokens, top_scores.
     """
     step: int
     chosen_token: int
     top_tokens: list[int] | None = None
     top_scores: list[float] | None = None
+    is_ambiguous: bool = False  # True when top-2 logits are within epsilon
 
     def to_dict(self, mode: TraceMode = TraceMode.STANDARD, verbose: bool = False) -> dict:
         """Serialize step. verbose=True is legacy compat for mode=VERBOSE."""
         use_verbose = (mode == TraceMode.VERBOSE) or verbose
         d = {"step": self.step, "chosen_token": self.chosen_token}
+        if self.is_ambiguous:
+            d["is_ambiguous"] = True
         if use_verbose and self.top_tokens is not None:
             d["top_tokens"] = self.top_tokens
             if self.top_scores is not None:
@@ -144,6 +148,7 @@ class GenerationTrace:
         chosen_token: int,
         top_tokens: list[int] | None = None,
         top_scores: list[float] | None = None,
+        is_ambiguous: bool = False,
     ) -> None:
         """Record a generation step."""
         self.steps.append(GenerationStep(
@@ -151,6 +156,7 @@ class GenerationTrace:
             chosen_token=chosen_token,
             top_tokens=top_tokens,
             top_scores=top_scores,
+            is_ambiguous=is_ambiguous,
         ))
 
     def finalize(self, eos_token_id: int | None = None) -> None:

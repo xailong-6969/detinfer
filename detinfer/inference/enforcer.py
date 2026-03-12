@@ -291,18 +291,52 @@ class DeterministicEnforcer:
         self._hooks.clear()
 
     def _is_attention_module(self, module: nn.Module) -> bool:
-        """Check if a module is an attention layer that might use SDPA."""
-        module_name = type(module).__name__.lower()
-        module_path = f"{type(module).__module__}.{type(module).__name__}".lower()
+        """Check if a module is an attention layer that might use SDPA.
 
-        attention_patterns = [
+        Detection strategy (layered):
+            1. Name-based: matches known class name patterns.
+            2. Family-aware: matches HuggingFace model-family attention
+               class names (e.g., LlamaAttention, MistralAttention).
+            3. Source-based: inspects module's forward() source code
+               for calls to scaled_dot_product_attention.
+        """
+        cls_name = type(module).__name__
+        cls_lower = cls_name.lower()
+        module_path = f"{type(module).__module__}.{cls_name}".lower()
+
+        # Strategy 1: Generic attention patterns
+        generic_patterns = [
             "multiheadattention",
             "selfattention",
             "scaleddotproduct",
             "sdpa",
         ]
+        if any(p in cls_lower or p in module_path for p in generic_patterns):
+            return True
 
-        return any(p in module_name or p in module_path for p in attention_patterns)
+        # Strategy 2: Known HuggingFace model-family attention classes
+        # These cover the most common CausalLM architectures.
+        hf_attention_suffixes = [
+            "attention",       # LlamaAttention, MistralAttention, etc.
+            "sdpaattention",   # LlamaSdpaAttention, etc.
+            "flashattention2", # LlamaFlashAttention2, etc.
+        ]
+        if any(cls_lower.endswith(suffix) for suffix in hf_attention_suffixes):
+            # Confirm it's from a transformers/modeling module
+            mod = type(module).__module__ or ""
+            if "transformers" in mod or "modeling" in mod:
+                return True
+
+        # Strategy 3: Source inspection for F.scaled_dot_product_attention
+        try:
+            import inspect
+            source = inspect.getsource(type(module).forward)
+            if "scaled_dot_product_attention" in source:
+                return True
+        except (OSError, TypeError):
+            pass  # Built-in or C module, skip
+
+        return False
 
     @staticmethod
     def _replace_module(

@@ -107,7 +107,7 @@ pip install -e ".[dev]"           # For development and testing
 import detinfer
 detinfer.enforce(seed=42)
 
-# Everything after this line is deterministic
+# Everything after this line runs with detinfer's deterministic controls enabled
 output = model(input)  # Same input = same output, every time
 ```
 
@@ -124,7 +124,7 @@ detinfer verify <hf-model>
 detinfer agent <hf-model>
 ```
 
-Replace `<hf-model>` with any HuggingFace model name.
+Replace `<hf-model>` with a supported HuggingFace model name. See [Compatibility](#compatibility).
 
 ---
 
