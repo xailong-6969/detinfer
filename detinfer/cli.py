@@ -216,8 +216,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 current_ids = torch.tensor([[token_id]], device=device)
 
         text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-        all_ids = torch.cat([inputs["input_ids"][0].cpu(), torch.tensor(generated_ids)])
-        h = hashlib.sha256(all_ids.numpy().tobytes()).hexdigest()
+        h = hashlib.sha256(text.encode("utf-8")).hexdigest()
         raw_hashes.append(h)
         raw_texts.append(text)
         match = "" if i == 0 else (" ✓ same" if h == raw_hashes[0] else " ✗ DIFFERENT")

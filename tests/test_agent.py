@@ -382,6 +382,76 @@ class TestReplay:
         finally:
             os.unlink(path)
 
+    def test_replay_strict_requires_step_data(self, monkeypatch):
+        from detinfer.agent.replay import replay_session
+        import detinfer.agent.runtime as runtime_mod
+
+        class FakeSession:
+            def __init__(self):
+                self.generations = []
+                self.messages = []
+
+            def add_message(self, role: str, content: str) -> None:
+                self.messages.append({"role": role, "content": content})
+
+        class FakeAgent:
+            def __init__(
+                self,
+                model_name: str,
+                seed: int = 42,
+                max_new_tokens: int = 256,
+                trace_mode: str = "standard",
+                quantize: str | None = None,
+                system_prompt: str | None = None,
+            ):
+                self.model_name = model_name
+                self.seed = seed
+                self.max_new_tokens = max_new_tokens
+                self.trace_mode = trace_mode
+                self.quantize = quantize
+                self.session = FakeSession()
+                self._turn_count = 0
+
+                if system_prompt:
+                    self.session.add_message("system", system_prompt)
+
+            def chat(self, message: str) -> str:
+                self._turn_count += 1
+                self.session.add_message("user", message)
+                gen = GenerationTrace(turn=self._turn_count)
+                gen.output_tokens = [10]
+                gen.stop_reason = "max_new_tokens"
+                self.session.generations.append(gen)
+                self.session.add_message("assistant", "ok")
+                return "ok"
+
+        session = SessionTrace(
+            trace_type="agent",
+            model="test-model",
+            seed=42,
+            trace_mode=TraceMode.MINIMAL,
+        )
+        session.add_message("user", "hello")
+        session.add_message("assistant", "ok")
+
+        gen = GenerationTrace(turn=1)
+        gen.output_tokens = [10]
+        gen.stop_reason = "max_new_tokens"
+        session.add_generation(gen)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            path = f.name
+
+        try:
+            session.export_json(path)
+            monkeypatch.setattr(runtime_mod, "DeterministicAgent", FakeAgent)
+            result = replay_session(path, strict=True)
+            assert not result.passed
+            assert result.failure_turn == 1
+            assert result.failure_reason == "Strict mode requires per-step trace data"
+        finally:
+            os.unlink(path)
+
 
 # ---------------------------------------------------------------------------
 # TruncationPolicy tests

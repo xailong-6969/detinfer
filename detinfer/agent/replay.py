@@ -247,8 +247,20 @@ def replay_session(
                 failure_reason=f"Stop reason mismatch: expected '{orig_gen.stop_reason}', got '{replay_gen.stop_reason}'",
             )
 
-        # Strict mode: check every step
-        if strict and orig_gen.steps:
+        # Strict mode: require and verify every step.
+        if strict and not orig_gen.steps:
+            return ReplayResult(
+                passed=False,
+                total_turns=total_turns,
+                verified_turns=verified,
+                failure_turn=turn_num,
+                failure_reason="Strict mode requires per-step trace data",
+                details=[
+                    "This trace does not include generation steps for the turn.",
+                    "Re-export with trace_mode=standard or trace_mode=verbose.",
+                ],
+            )
+        if strict:
             if len(replay_gen.steps) != len(orig_gen.steps):
                 return ReplayResult(
                     passed=False,

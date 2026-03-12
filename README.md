@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-163%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-170%20passed-brightgreen.svg)]()
 [![PyPI](https://img.shields.io/badge/pypi-v0.3.0-blue.svg)](https://pypi.org/project/detinfer/)
 
 > **New to detinfer?** Start with the [Simple Guide](docs/GUIDE.md) -- explains everything in plain language.
@@ -810,7 +810,7 @@ jobs:
 ```
 detinfer/
   __init__.py       # Top-level API: enforce(), status(), checkpoint_hash()
-  cli.py            # CLI entry point (16 commands)
+  cli.py            # CLI entry point (15 commands)
   check.py          # Regression check: compare two traces, classify drift
 
   inference/        # Deterministic inference library
@@ -850,7 +850,7 @@ pip install "detinfer[dev]"
 pytest tests/ -v
 ```
 
-163 tests covering all modules.
+170 tests covering all modules.
 
 ---
 

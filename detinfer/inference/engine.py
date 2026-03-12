@@ -264,8 +264,15 @@ class DeterministicEngine:
         self.model = model
         self.tokenizer = tokenizer
         self.model_name = model_name or model.__class__.__name__
+        has_device_map = isinstance(getattr(self.model, "hf_device_map", None), dict)
+        is_quantized = bool(
+            getattr(self.model, "is_loaded_in_8bit", False)
+            or getattr(self.model, "is_loaded_in_4bit", False)
+        )
+        self._multi_gpu = has_device_map
 
-        self.model.to(self.device)
+        if not has_device_map and not is_quantized:
+            self.model.to(self.device)
 
         # Enforce determinism
         self.enforcement_report = self.enforcer.enforce(
@@ -481,13 +488,18 @@ class DeterministicEngine:
         For multi-GPU models, inputs go to the first device in the model's
         device map. For single-device, inputs go to self.device.
         """
-        if self._multi_gpu and self.model is not None:
-            # For models loaded with device_map, get the device of the
-            # first parameter (usually the embedding layer)
-            try:
-                first_param = next(self.model.parameters())
-                return first_param.device
-            except StopIteration:
-                return self.device
+        if self.model is not None:
+            has_device_map = isinstance(getattr(self.model, "hf_device_map", None), dict)
+            is_quantized = bool(
+                getattr(self.model, "is_loaded_in_8bit", False)
+                or getattr(self.model, "is_loaded_in_4bit", False)
+            )
+            if self._multi_gpu or has_device_map or is_quantized:
+                # For dispatched/quantized models, use parameter device directly.
+                try:
+                    first_param = next(self.model.parameters())
+                    return first_param.device
+                except StopIteration:
+                    return self.device
         return self.device
 
