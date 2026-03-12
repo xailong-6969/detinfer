@@ -15,6 +15,7 @@ from detinfer.agent.trace import (
     GenerationStep,
     GenerationTrace,
     SessionTrace,
+    TraceMode,
     _hash_string,
     _hash_token_list,
 )
@@ -81,9 +82,19 @@ class TestGenerationTrace:
     def test_to_dict_minimal(self):
         trace = GenerationTrace(turn=1)
         trace.add_step(step=0, chosen_token=42)
-        d = trace.to_dict(verbose=False)
+        d = trace.to_dict(mode=TraceMode.MINIMAL)
         assert "rendered_prompt" not in d
+        assert "steps" not in d  # minimal mode excludes steps
+        assert "input_tokens" not in d
         assert d["turn"] == 1
+
+    def test_to_dict_standard(self):
+        trace = GenerationTrace(turn=1, rendered_prompt="Hello")
+        trace.add_step(step=0, chosen_token=42)
+        d = trace.to_dict(mode=TraceMode.STANDARD)
+        assert d["rendered_prompt"] == "Hello"
+        assert len(d["steps"]) == 1
+        assert "top_tokens" not in d["steps"][0]
 
     def test_to_dict_verbose(self):
         trace = GenerationTrace(turn=1, rendered_prompt="Hello")
@@ -127,7 +138,7 @@ class TestSessionTrace:
         assert h1 != h2
 
     def test_export_import_roundtrip(self):
-        session = SessionTrace(model="gpt2", seed=42, trace_mode="minimal")
+        session = SessionTrace(model="gpt2", seed=42, trace_mode=TraceMode.STANDARD)
         session.add_message("user", "What is 2+2?")
         session.add_message("assistant", "4")
 
@@ -161,6 +172,30 @@ class TestSessionTrace:
             assert loaded.session_hash == session.session_hash
         finally:
             os.unlink(path)
+
+    def test_canonical_hash_independent_of_trace_mode(self):
+        """Critical invariant: same run, different trace modes, same hash."""
+        def make_session(mode: TraceMode) -> SessionTrace:
+            s = SessionTrace(model="gpt2", seed=42, trace_mode=mode)
+            s.add_message("user", "test")
+            gen = GenerationTrace(turn=1, rendered_prompt="test")
+            gen.input_tokens = [1, 2, 3]
+            gen.output_tokens = [10, 20]
+            gen.add_step(step=0, chosen_token=10, top_tokens=[10, 5], top_scores=[9.0, 3.0])
+            gen.add_step(step=1, chosen_token=20)
+            gen.finalize(eos_token_id=50256)
+            s.add_generation(gen)
+            return s
+
+        s_min = make_session(TraceMode.MINIMAL)
+        s_std = make_session(TraceMode.STANDARD)
+        s_verb = make_session(TraceMode.VERBOSE)
+
+        h_min = s_min.compute_session_hash()
+        h_std = s_std.compute_session_hash()
+        h_verb = s_verb.compute_session_hash()
+
+        assert h_min == h_std == h_verb
 
 
 # ---------------------------------------------------------------------------

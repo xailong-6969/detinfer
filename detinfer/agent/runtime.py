@@ -27,6 +27,7 @@ from detinfer.agent.trace import (
     AgentStep,
     GenerationTrace,
     SessionTrace,
+    TraceMode,
     build_environment,
     compute_model_hash,
     compute_tokenizer_hash,
@@ -77,7 +78,7 @@ class DeterministicAgent:
         model_name: str,
         seed: int = 42,
         max_new_tokens: int = 256,
-        trace_mode: str = "minimal",
+        trace_mode: str | TraceMode = "standard",
         quantize: str | None = None,
         device: str | None = None,
         system_prompt: str | None = None,
@@ -88,7 +89,7 @@ class DeterministicAgent:
             model_name: HuggingFace model ID.
             seed: Master random seed.
             max_new_tokens: Max tokens per generation.
-            trace_mode: "minimal" (default) or "topk" for verbose trace.
+            trace_mode: Trace detail level ("minimal", "standard", "verbose").
             quantize: Quantization mode (None or "int8", experimental).
             device: Device to use (auto-detected if None).
             system_prompt: Optional system prompt (e.g., "You are a math tutor").
@@ -96,7 +97,7 @@ class DeterministicAgent:
         self.model_name = model_name
         self.seed = seed
         self.max_new_tokens = max_new_tokens
-        self.trace_mode = trace_mode
+        self.trace_mode = TraceMode(trace_mode) if isinstance(trace_mode, str) else trace_mode
         self.quantize = quantize
         self.system_prompt = system_prompt
 
@@ -188,7 +189,7 @@ class DeterministicAgent:
         eos_id = tokenizer.eos_token_id
         generated_ids = []
         current_ids = inputs["input_ids"]
-        verbose = self.trace_mode == "topk"
+        verbose = self.trace_mode == TraceMode.VERBOSE
 
         # Token-by-token generation with deterministic argmax + KV cache
         past_key_values = None
@@ -298,7 +299,7 @@ class DeterministicAgent:
         eos_id = tokenizer.eos_token_id
         generated_ids = []
         current_ids = inputs["input_ids"]
-        verbose = self.trace_mode == "topk"
+        verbose = self.trace_mode == TraceMode.VERBOSE
 
         # Token-by-token generation with streaming + KV cache
         past_key_values = None

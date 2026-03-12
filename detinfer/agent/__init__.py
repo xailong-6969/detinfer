@@ -7,8 +7,10 @@ session replay, and diff verification.
 
 from detinfer.agent.runtime import DeterministicAgent, deterministic_argmax
 from detinfer.agent.trace import (
+    TraceMode,
     GenerationStep,
     GenerationTrace,
+    AgentStep,
     SessionTrace,
     build_environment,
     compute_model_hash,
@@ -25,8 +27,10 @@ from detinfer.agent.replay import (
 __all__ = [
     "DeterministicAgent",
     "deterministic_argmax",
+    "TraceMode",
     "GenerationStep",
     "GenerationTrace",
+    "AgentStep",
     "SessionTrace",
     "build_environment",
     "compute_model_hash",
@@ -37,3 +41,4 @@ __all__ = [
     "ReplayResult",
     "DiffResult",
 ]
+

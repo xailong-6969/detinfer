@@ -423,7 +423,7 @@ def cmd_agent(args: argparse.Namespace) -> None:
         model_name=args.model,
         seed=args.seed,
         max_new_tokens=args.max_tokens,
-        trace_mode="topk" if args.verbose_trace else "minimal",
+        trace_mode=args.trace_mode,
         quantize=args.quantize,
         device=args.device,
         system_prompt=args.system,
@@ -872,7 +872,8 @@ def main() -> None:
     agent_parser.add_argument("--max-tokens", type=int, default=256, help="Max new tokens per turn (default: 256)")
     agent_parser.add_argument("--system", default=None, help="System prompt (e.g., 'You are a math tutor')")
     agent_parser.add_argument("--quantize", default=None, choices=["int8"], help="Quantization mode (experimental)")
-    agent_parser.add_argument("--verbose-trace", action="store_true", help="Record top-k tokens per step")
+    agent_parser.add_argument("--trace-mode", default="standard", choices=["minimal", "standard", "verbose"],
+                              help="Trace detail level (default: standard)")
 
     # -- detinfer replay <session.json> --
     replay_parser = subparsers.add_parser("replay", help="Replay and verify a saved session")
