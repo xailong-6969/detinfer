@@ -212,6 +212,9 @@ class SessionTrace:
     # Schema
     schema_version: str = "1"
 
+    # Trace type: "inference" or "agent"
+    trace_type: str = "inference"
+
     # Model
     model: str = ""
     model_hash: str = ""
@@ -333,6 +336,7 @@ class SessionTrace:
         mode = self.trace_mode if isinstance(self.trace_mode, TraceMode) else TraceMode(self.trace_mode)
         return {
             "schema_version": self.schema_version,
+            "trace_type": self.trace_type,
             "trace_mode": mode.value,
             "model": self.model,
             "model_hash": self.model_hash,
@@ -378,6 +382,7 @@ class SessionTrace:
         """Reconstruct SessionTrace from dict."""
         session = cls(
             schema_version=data.get("schema_version", "1"),
+            trace_type=data.get("trace_type", "inference"),
             model=data.get("model", ""),
             model_hash=data.get("model_hash", ""),
             seed=data.get("seed", 42),

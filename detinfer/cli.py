@@ -809,6 +809,40 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         print("═" * 60)
 
 
+def cmd_check(args: argparse.Namespace) -> None:
+    """Compare two session traces for regression."""
+    import gzip
+    from detinfer.check import check_sessions, render_check_report
+
+    def _load_trace(path: str) -> dict:
+        if path.endswith(".gz"):
+            with gzip.open(path, "rt", encoding="utf-8") as f:
+                return json.load(f)
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    baseline = _load_trace(args.baseline)
+    candidate = _load_trace(args.candidate)
+
+    report = check_sessions(
+        baseline, candidate,
+        fail_on=set(args.fail_on),
+        allow=set(args.allow),
+    )
+
+    if args.json_output:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(render_check_report(
+            report,
+            baseline_path=args.baseline,
+            candidate_path=args.candidate,
+        ))
+
+    if report.status == "failed":
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="detinfer",
@@ -922,6 +956,17 @@ def main() -> None:
     doctor_parser.add_argument("--max-tokens", type=int, default=256, help="Max new tokens (default: 256)")
     doctor_parser.add_argument("--json", action="store_true", help="Output report as JSON (for CI)")
 
+    # -- detinfer check <baseline> <candidate> --
+    check_parser = subparsers.add_parser("check", help="Compare two session traces for regression")
+    check_parser.add_argument("baseline", help="Baseline session JSON file")
+    check_parser.add_argument("candidate", help="Candidate session JSON file")
+    check_parser.add_argument("--json", action="store_true", dest="json_output",
+                              help="Output report as JSON")
+    check_parser.add_argument("--fail-on", action="append", default=[],
+                              help="Mismatch type that should fail (e.g. OUTPUT_DRIFT)")
+    check_parser.add_argument("--allow", action="append", default=[],
+                              help="Mismatch type to ignore (e.g. ENVIRONMENT_DRIFT)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -942,6 +987,7 @@ def main() -> None:
         "diff": cmd_diff,
         "verify-session": cmd_verify_session,
         "doctor": cmd_doctor,
+        "check": cmd_check,
     }
 
     handlers[args.command](args)

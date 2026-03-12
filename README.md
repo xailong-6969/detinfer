@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-88%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-115%20passed-brightgreen.svg)]()
 [![PyPI](https://img.shields.io/badge/pypi-v0.2.3-blue.svg)](https://pypi.org/project/detinfer/)
 
 ---
@@ -117,11 +117,23 @@ detinfer agent <model> --prompt "What is 2+2?"      # Non-interactive (single qu
 detinfer agent <model> --system "You are a tutor"   # Set system prompt
 detinfer agent <model> --export session.json        # Export session trace
 detinfer agent <model> --quantize int8              # Experimental INT8 mode
-detinfer agent <model> --verbose-trace              # Record top-k tokens per step
+detinfer agent <model> --trace-mode verbose         # Record top-k tokens per step
+detinfer agent <model> --max-context-tokens 2048    # Deterministic context truncation
+detinfer agent <model> --save-state state.json      # Save agent state on exit
+detinfer agent <model> --load-state state.json      # Resume from saved state
 detinfer replay session.json                        # Replay a saved agent session
 detinfer replay session.json --strict               # Step-by-step verification
 detinfer verify-session session.json                # Verify session as execution proof
 detinfer diff run_a.json run_b.json                 # Token-level comparison of two runs
+
+# ══════════════════════════════════════
+# REGRESSION CHECK
+# ══════════════════════════════════════
+
+detinfer check baseline.json candidate.json         # Compare traces for regression
+detinfer check baseline.json candidate.json --json  # JSON output for CI
+detinfer check a.json b.json --fail-on OUTPUT_DRIFT # Fail on specific drift type
+detinfer check a.json b.json --allow ENVIRONMENT_DRIFT  # Ignore env differences
 
 # ══════════════════════════════════════
 # INFO
@@ -341,7 +353,70 @@ Exported sessions contain:
 }
 ```
 
-With `--verbose-trace`, each step also includes `top_tokens` and `top_scores` (top-10 candidates).
+With `--trace-mode verbose`, each step also includes `top_tokens` and `top_scores` (top-10 candidates).
+
+### Trace Modes
+
+Three levels of trace detail — all produce the same canonical session hash:
+
+| Mode | What's captured | Use case |
+|------|----------------|----------|
+| `minimal` | Hashes + output tokens only | CI, benchmarks |
+| `standard` | + rendered prompt, input tokens, step trace | Replay, debugging |
+| `verbose` | + top-k tokens and scores per step | Deep diagnosis |
+
+```bash
+detinfer agent <model> --trace-mode minimal    # Lightweight
+detinfer agent <model> --trace-mode verbose    # Full detail
+```
+
+### Deterministic Truncation
+
+When conversations exceed the context window, detinfer uses a deterministic truncation policy:
+
+- System prompt is **never** dropped
+- Latest user message is **never** dropped
+- Oldest turns are dropped first (user+assistant pairs together)
+- Every truncation event is recorded in the trace
+
+```python
+agent = DeterministicAgent(
+    "gpt2", seed=42,
+    max_context_tokens=2048  # Truncate when prompt exceeds 2048 tokens
+)
+```
+
+Same history + same policy = same truncation = same output. This prevents hidden non-determinism from framework-specific truncation.
+
+### Session Save & Resume
+
+Save agent state mid-conversation and resume later:
+
+```python
+# Save
+agent.save_state("agent_state.json")
+
+# Resume (same model must be loaded)
+agent.load_state("agent_state.json")
+response = agent.chat("Continue where we left off")
+```
+
+CLI:
+```bash
+detinfer agent <model> --save-state state.json    # Save on exit
+detinfer agent <model> --load-state state.json    # Resume
+```
+
+### Trace Type Separation
+
+Inference and agent traces are clearly labeled in the JSON:
+
+```json
+{"trace_type": "inference", ...}   // from detinfer export
+{"trace_type": "agent", ...}       // from detinfer agent --export
+```
+
+`detinfer check` will catch if you accidentally compare an inference trace against an agent trace (`TYPE_MISMATCH`).
 
 ### Replay & Verification
 
@@ -381,8 +456,51 @@ detinfer verify-session session.json
     ✓ This session is a valid deterministic execution proof.
   ══════════════════════════════════════════════════════════════
 ```
-# DETERMINISTIC: All 5 runs produced identical output
+
+### Regression Check
+
+Compare two session traces and classify exactly what changed:
+
+```bash
+detinfer check baseline.json candidate.json
 ```
+
+```
+Detinfer Regression Report
+--------------------------
+Baseline:  baseline.json
+Candidate: candidate.json
+
+Status: FAILED
+Primary type: TOKENIZER_DRIFT
+
+Matched:
+  ✓ model
+  ✓ seed
+  ✓ generation_config
+
+Changed:
+  ✗ tokenizer.tokenizer_hash
+
+First mismatch:
+  type:  TOKENIZER_DRIFT
+  field: tokenizer.tokenizer_hash
+```
+
+Mismatch types:
+
+| Type | Severity | Meaning |
+|------|----------|---------|
+| `TYPE_MISMATCH` | error | Comparing inference vs agent trace |
+| `MODEL_DRIFT` | error | Model name or weights changed |
+| `TOKENIZER_DRIFT` | error | Tokenizer or chat template changed |
+| `CONFIG_DRIFT` | error | Seed, temperature, or gen config changed |
+| `PROMPT_DRIFT` | error | Messages or rendered prompt changed |
+| `INPUT_TOKEN_DRIFT` | error | Same text tokenized differently |
+| `OUTPUT_DRIFT` | error | Model produced different tokens |
+| `STOP_REASON_DRIFT` | error | EOS vs max_tokens changed |
+| `ENVIRONMENT_DRIFT` | warning | Torch/Python version changed |
+| `TRACE_DETAIL_DRIFT` | info | Verbose-only fields differ |
 
 ---
 
@@ -393,14 +511,24 @@ detinfer verify-session session.json
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--prompt` | — | Non-interactive mode (single question) |
-| `--stream` | off | Stream tokens as they are generated |
 | `--system` | — | System prompt (e.g., "You are a math tutor") |
 | `--seed` | 42 | Random seed |
 | `--max-tokens` | 256 | Max tokens per turn |
 | `--device` | auto | Device (cpu, cuda, auto) |
 | `--export` | — | Export session trace to JSON |
 | `--quantize` | — | Quantization mode (`int8`, experimental) |
-| `--verbose-trace` | off | Record top-k tokens and scores per step |
+| `--trace-mode` | standard | Trace detail: `minimal`, `standard`, `verbose` |
+| `--max-context-tokens` | — | Max prompt tokens before truncation |
+| `--save-state` | — | Save agent state to file on exit |
+| `--load-state` | — | Resume from a saved agent state file |
+
+### `detinfer check`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | off | Output report as JSON |
+| `--fail-on` | — | Mismatch type that should fail (repeatable) |
+| `--allow` | — | Mismatch type to ignore (repeatable) |
 
 ### `detinfer verify-session`
 
@@ -446,7 +574,8 @@ detinfer applies deterministic runtime settings for 7 sources of non-determinism
 ```
 detinfer/
   __init__.py       # Top-level API: enforce(), status(), checkpoint_hash()
-  cli.py            # CLI entry point (14 commands)
+  cli.py            # CLI entry point (15 commands)
+  check.py          # Regression check: compare two traces, classify drift
 
   inference/        # Deterministic inference library
     config.py       # Seed locking + deterministic flags
@@ -462,8 +591,8 @@ detinfer/
     utils.py        # Hashing + env snapshots
 
   agent/            # Deterministic agent system
-    runtime.py      # DeterministicAgent — multi-turn agent with deterministic argmax
-    trace.py        # Token-level trace recording + session schema
+    runtime.py      # DeterministicAgent — multi-turn with truncation + save/resume
+    trace.py        # Token-level trace recording + session schema + trace modes
     replay.py       # Session replay verification + diff
 ```
 
@@ -496,11 +625,23 @@ detinfer.checkpoint_hash(model)         # Hash model weights (for training)
 
 | Method | Description |
 |--------|-------------|
-| `DeterministicAgent(model, seed, system_prompt)` | Create agent |
+| `DeterministicAgent(model, seed, system_prompt, max_context_tokens)` | Create agent |
 | `.chat(message)` | Send message, get response (deterministic argmax) |
 | `.chat_stream(message)` | Stream tokens as generated |
+| `.register_tool(name, fn)` | Register a callable tool |
+| `.call_tool(name, args)` | Call tool and record in trace |
+| `.checkpoint(data)` | Record a checkpoint event |
 | `.export_session(path)` | Export full token trace to JSON |
 | `.get_session_hash()` | Get canonical session hash |
+| `.save_state(path)` | Save full agent state for resume |
+| `.load_state(path)` | Resume agent from saved state |
+
+### Regression Check
+
+| Function | Description |
+|----------|-------------|
+| `check_sessions(baseline, candidate)` | Compare two trace dicts, classify mismatches |
+| `render_check_report(report)` | Human-readable regression report |
 
 ### Replay & Diff
 

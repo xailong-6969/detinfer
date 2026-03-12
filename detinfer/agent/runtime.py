@@ -146,6 +146,7 @@ class DeterministicAgent:
 
         # Build session trace
         self.session = SessionTrace(
+            trace_type="agent",
             model=model_name,
             model_hash=compute_model_hash(self.engine.model),
             seed=seed,
