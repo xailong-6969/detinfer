@@ -1,5 +1,5 @@
 """
-Tests for detinfer v0.2.3 agent, trace, and replay modules.
+Tests for detinfer v0.3.0 agent, trace, and replay modules.
 
 These tests verify the core data structures and logic without
 requiring a GPU or transformers (except where noted).

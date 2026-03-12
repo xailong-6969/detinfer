@@ -47,7 +47,7 @@ class InferenceProof:
 
     # Metadata
     timestamp: str = ""
-    detinfer_version: str = "0.2.3"
+    detinfer_version: str = "0.3.0"
     trace_type: str = "inference"
     
     # Token-level details (Gold standard schema)

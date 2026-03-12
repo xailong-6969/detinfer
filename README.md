@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-163%20passed-brightgreen.svg)]()
-[![PyPI](https://img.shields.io/badge/pypi-v0.2.3-blue.svg)](https://pypi.org/project/detinfer/)
+[![PyPI](https://img.shields.io/badge/pypi-v0.3.0-blue.svg)](https://pypi.org/project/detinfer/)
 
 > **New to detinfer?** Start with the [Simple Guide](docs/GUIDE.md) -- explains everything in plain language.
 
