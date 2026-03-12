@@ -173,6 +173,26 @@ class TestSessionTrace:
         finally:
             os.unlink(path)
 
+    def test_step_ambiguity_roundtrip(self):
+        session = SessionTrace(model="test-model", seed=42, trace_mode=TraceMode.STANDARD)
+        session.add_message("user", "Hello")
+
+        gen = GenerationTrace(turn=1, rendered_prompt="Hello")
+        gen.add_step(step=0, chosen_token=42, is_ambiguous=True)
+        gen.output_tokens = [42]
+        gen.finalize(eos_token_id=50256)
+        session.add_generation(gen)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            path = f.name
+
+        try:
+            session.export_json(path)
+            loaded = SessionTrace.from_json(path)
+            assert loaded.generations[0].steps[0].is_ambiguous is True
+        finally:
+            os.unlink(path)
+
     def test_canonical_hash_independent_of_trace_mode(self):
         """Critical invariant: same run, different trace modes, same hash."""
         def make_session(mode: TraceMode) -> SessionTrace:
@@ -270,6 +290,97 @@ class TestDiff:
         finally:
             os.unlink(p1)
             os.unlink(p2)
+
+
+class TestReplay:
+    def test_replay_preserves_tool_messages(self, monkeypatch):
+        from detinfer.agent.replay import replay_session
+        import detinfer.agent.runtime as runtime_mod
+
+        class FakeSession:
+            def __init__(self):
+                self.generations = []
+                self.messages = []
+
+            def add_message(self, role: str, content: str) -> None:
+                self.messages.append({"role": role, "content": content})
+
+        class FakeAgent:
+            def __init__(
+                self,
+                model_name: str,
+                seed: int = 42,
+                max_new_tokens: int = 256,
+                trace_mode: str = "standard",
+                quantize: str | None = None,
+                system_prompt: str | None = None,
+            ):
+                self.model_name = model_name
+                self.seed = seed
+                self.max_new_tokens = max_new_tokens
+                self.trace_mode = trace_mode
+                self.quantize = quantize
+                self.session = FakeSession()
+                self._conversation_history = []
+                self._turn_count = 0
+
+                if system_prompt:
+                    self._conversation_history.append(
+                        {"role": "system", "content": system_prompt}
+                    )
+                    self.session.add_message("system", system_prompt)
+
+            def chat(self, message: str) -> str:
+                self._turn_count += 1
+                self._conversation_history.append({"role": "user", "content": message})
+                self.session.add_message("user", message)
+
+                gen = GenerationTrace(turn=self._turn_count)
+                if self._turn_count == 1:
+                    gen.output_tokens = [10, 20]
+                else:
+                    has_tool = any(
+                        m.get("role") == "tool"
+                        and m.get("content") == "[Tool: calculator] Result: 4"
+                        for m in self._conversation_history
+                    )
+                    gen.output_tokens = [30] if has_tool else [99]
+                gen.stop_reason = "max_new_tokens"
+                self.session.generations.append(gen)
+
+                self._conversation_history.append({"role": "assistant", "content": "ok"})
+                self.session.add_message("assistant", "ok")
+                return "ok"
+
+        session = SessionTrace(trace_type="agent", model="test-model", seed=42)
+        session.add_message("system", "You are helpful.")
+        session.add_message("user", "first")
+        session.add_message("assistant", "a1")
+        session.add_message("tool", "[Tool: calculator] Result: 4")
+        session.add_message("user", "second")
+        session.add_message("assistant", "a2")
+
+        g1 = GenerationTrace(turn=1)
+        g1.output_tokens = [10, 20]
+        g1.stop_reason = "max_new_tokens"
+        session.add_generation(g1)
+
+        g2 = GenerationTrace(turn=2)
+        g2.output_tokens = [30]
+        g2.stop_reason = "max_new_tokens"
+        session.add_generation(g2)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            path = f.name
+
+        try:
+            session.export_json(path)
+            monkeypatch.setattr(runtime_mod, "DeterministicAgent", FakeAgent)
+            result = replay_session(path)
+            assert result.passed
+            assert result.verified_turns == 2
+        finally:
+            os.unlink(path)
 
 
 # ---------------------------------------------------------------------------

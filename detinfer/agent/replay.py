@@ -125,12 +125,15 @@ def replay_session(
             failure_reason="No model specified in trace or arguments",
         )
 
-    # Extract user messages
-    user_messages = [m["content"] for m in original.messages if m["role"] == "user"]
-    total_turns = len(user_messages)
+    total_turns = len(original.generations)
 
     if total_turns == 0:
         return ReplayResult(passed=True, total_turns=0, verified_turns=0)
+
+    system_prompt = next(
+        (m.get("content") for m in original.messages if m.get("role") == "system"),
+        None,
+    )
 
     # Create agent with same config
     max_tokens = original.generation_config.get("max_new_tokens", 256)
@@ -140,13 +143,30 @@ def replay_session(
         max_new_tokens=max_tokens,
         trace_mode=original.trace_mode,
         quantize=original.quantization.get("mode"),
+        system_prompt=system_prompt,
     )
 
     details = []
     verified = 0
+    turn_num = 0
 
-    for i, user_msg in enumerate(user_messages):
-        turn_num = i + 1
+    for msg in original.messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+
+        if role == "system":
+            continue
+
+        if role == "tool":
+            # Preserve tool context so subsequent user turns render the same prompt.
+            agent._conversation_history.append({"role": "tool", "content": content})
+            agent.session.add_message("tool", content)
+            continue
+
+        if role != "user":
+            continue
+
+        turn_num += 1
 
         # Find original generation for this turn
         orig_gen = None
@@ -163,7 +183,7 @@ def replay_session(
             )
 
         # Run the turn
-        _ = agent.chat(user_msg)
+        _ = agent.chat(content)
 
         # Get replay generation
         replay_gen = agent.session.generations[-1]
@@ -229,6 +249,18 @@ def replay_session(
 
         # Strict mode: check every step
         if strict and orig_gen.steps:
+            if len(replay_gen.steps) != len(orig_gen.steps):
+                return ReplayResult(
+                    passed=False,
+                    total_turns=total_turns,
+                    verified_turns=verified,
+                    failure_turn=turn_num,
+                    failure_reason="Step count mismatch",
+                    details=[
+                        f"Expected {len(orig_gen.steps)} step records",
+                        f"Observed {len(replay_gen.steps)} step records",
+                    ],
+                )
             for step_idx, (orig_step, replay_step) in enumerate(
                 zip(orig_gen.steps, replay_gen.steps)
             ):
@@ -243,6 +275,18 @@ def replay_session(
 
         verified += 1
         details.append(f"Turn {turn_num}: ✓ ({len(replay_gen.output_tokens)} tokens)")
+
+    if verified != total_turns:
+        return ReplayResult(
+            passed=False,
+            total_turns=total_turns,
+            verified_turns=verified,
+            failure_reason="Trace/message mismatch during replay",
+            details=[
+                f"Expected to replay {total_turns} turn(s)",
+                f"Actually replayed {verified} turn(s)",
+            ],
+        )
 
     return ReplayResult(
         passed=True, total_turns=total_turns, verified_turns=verified,
