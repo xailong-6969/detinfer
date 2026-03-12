@@ -1,65 +1,67 @@
-# detinfer — Deterministic Inference & Replay Toolkit
+# detinfer -- Deterministic Inference & Replay Toolkit
 
-**Deterministic runtime controls, session tracing, and replay verification for supported LLM workflows.**
+**Deterministic runtime controls, session tracing, and replay verification for LLM workflows.**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-162%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-163%20passed-brightgreen.svg)]()
 [![PyPI](https://img.shields.io/badge/pypi-v0.2.3-blue.svg)](https://pypi.org/project/detinfer/)
 
----
-
-## Why?
-
-Most reproducibility guides stop at setting RNG seeds. In practice, LLM runs can still drift because of decoding settings, backend behavior, prompt rendering, tokenizer differences, and attention/runtime choices.
-
-detinfer focuses on supported workflows where deterministic settings, token tracing, replay, and diffing can be used together to verify and debug LLM outputs.
-
-```python
-import detinfer
-detinfer.enforce()  # Apply deterministic runtime settings
-```
+> **New to detinfer?** Start with the [Simple Guide](docs/GUIDE.md) -- explains everything in plain language.
 
 ---
 
-## What detinfer is
+## Table of Contents
 
-- A **deterministic runtime and verification toolkit** for supported LLM inference paths
-- A **replay/debugging tool** for agent sessions and token-level generation traces
-- A **reproducibility aid** for benchmarking, CI, and regression testing
-
-## What detinfer is not
-
-- A guarantee of universal determinism for all PyTorch workloads
-- A guarantee of bitwise-identical outputs across all hardware and library combinations
-- A replacement for careful control of tokenizer, prompt formatting, backend, and environment
+1. [What is detinfer](#what-is-detinfer)
+2. [Installation](#installation)
+3. [Quick Start](#quick-start)
+4. [Part 1: Inference](#part-1-inference)
+5. [Part 2: Agent](#part-2-agent)
+6. [Part 3: Agent Harness](#part-3-agent-harness)
+7. [How It Works](#how-it-works)
+8. [CLI Reference](#cli-reference)
+9. [API Reference](#api-reference)
+10. [GitHub Action](#github-action)
+11. [Compatibility](#compatibility)
+12. [Running Tests](#running-tests)
 
 ---
 
-## Note on Determinism
+## What is detinfer
 
-detinfer enforces deterministic execution by disabling stochastic sampling (temperature/top-p) and enabling deterministic CUDA execution modes. This ensures that identical inputs produce identical outputs when run under the same environment.
+Most reproducibility guides stop at setting RNG seeds. In practice, LLM outputs can still drift because of decoding settings, backend behavior, prompt rendering, tokenizer differences, and attention implementations.
 
-The determinism stack includes:
-- Disabling sampling (`do_sample=False`, greedy decoding)
-- Locking RNG seeds (PyTorch, Python, NumPy, CUDA)
-- Forcing deterministic CUDA ops (`torch.use_deterministic_algorithms`)
-- Disabling cuDNN autotuning
-- Canonicalizing floating-point outputs
-- Hashing results for verification
+detinfer tackles this by combining:
 
-Cross-device determinism is best-effort and depends on the underlying hardware and kernels used by the model.
+- **Runtime enforcement** -- locks all random seeds, disables non-deterministic CUDA ops
+- **Session tracing** -- records every token generated, with hashes for verification
+- **Replay and diff** -- re-run or compare any two sessions token by token
+- **Regression checking** -- classify exactly what changed between two runs
+
+### What detinfer does NOT do
+
+- Guarantee determinism for all PyTorch workloads universally
+- Guarantee bitwise-identical outputs across different GPU models
+- Replace careful environment control (tokenizer, prompt format, backend)
 
 ---
 
 ## Installation
 
+### Step 1: Create and activate a virtual environment
+
 ```bash
-# Create and activate a virtual environment
 python3 -m venv venv
 source venv/bin/activate       # Linux/Mac
 # venv\Scripts\activate        # Windows
+```
 
+### Step 2: Install detinfer
+
+Basic install (core only):
+
+```bash
 pip install detinfer
 ```
 
@@ -75,115 +77,92 @@ With INT8 quantization (experimental):
 pip install "detinfer[quantized]"
 ```
 
-Update to latest version:
+### From source
 
 ```bash
-pip install --upgrade detinfer
+git clone https://github.com/xailong-6969/detinfer.git
+cd detinfer
+python3 -m venv venv
+source venv/bin/activate       # Linux/Mac
+# venv\Scripts\activate        # Windows
+
+pip install -e "."                # Basic install
+pip install -e ".[transformers]"  # With HuggingFace support
+pip install -e ".[dev]"           # For development and testing
 ```
 
 ### Requirements
 
 - Python 3.10+
 - PyTorch 2.0+
-- Any NVIDIA GPU (recommended) or CPU
-
-### Quick Reference — All CLI Commands
-
-```bash
-# Replace <model> with any HuggingFace model name
-
-# ══════════════════════════════════════
-# INFERENCE
-# ══════════════════════════════════════
-
-detinfer run <model>                                # Interactive deterministic inference
-detinfer run <model> --seed 42 --max-tokens 512     # Custom seed and token limit
-detinfer verify <model>                             # Run 5 times, compare hashes
-detinfer verify <model> --runs 10                   # Custom number of runs
-detinfer scan <model>                               # Scan for non-deterministic ops
-detinfer compare <model>                            # Before vs after detinfer comparison
-detinfer benchmark <model>                          # Full benchmark (auto-scales by model size)
-detinfer export <model> -o proof.json               # Export proof for cross-GPU verification
-detinfer cross-verify proof.json                    # Verify proof from another machine
-detinfer doctor <model>                             # Determinism health check & audit
-detinfer doctor <model> --json                      # JSON report for CI pipelines
-
-# ══════════════════════════════════════
-# AGENT
-# ══════════════════════════════════════
-
-detinfer agent <model>                              # Multi-turn deterministic agent
-detinfer agent <model> --prompt "What is 2+2?"      # Non-interactive (single question)
-detinfer agent <model> --system "You are a tutor"   # Set system prompt
-detinfer agent <model> --export session.json        # Export session trace
-detinfer agent <model> --quantize int8              # Experimental INT8 mode
-detinfer agent <model> --trace-mode verbose         # Record top-k tokens per step
-detinfer agent <model> --max-context-tokens 2048    # Deterministic context truncation
-detinfer agent <model> --save-state state.json      # Save agent state on exit
-detinfer agent <model> --load-state state.json      # Resume from saved state
-detinfer replay session.json                        # Replay a saved agent session
-detinfer replay session.json --strict               # Step-by-step verification
-detinfer verify-session session.json                # Verify session as execution proof
-detinfer diff run_a.json run_b.json                 # Token-level comparison of two runs
-
-# ══════════════════════════════════════
-# REGRESSION CHECK
-# ══════════════════════════════════════
-
-detinfer check baseline.json candidate.json         # Compare traces for regression
-detinfer check baseline.json candidate.json --json  # JSON output for CI
-detinfer check a.json b.json --fail-on OUTPUT_DRIFT # Fail on specific drift type
-detinfer check a.json b.json --allow ENVIRONMENT_DRIFT  # Ignore env differences
-
-# ══════════════════════════════════════
-# AGENT HARNESS
-# ══════════════════════════════════════
-
-detinfer agent-run task.json                        # Run a single harness task
-detinfer agent-run examples/                        # Run a suite of tasks
-detinfer agent-run task.json --against baseline.json # Compare against baseline
-detinfer agent-run examples/ --output-dir runs/     # Export traces per task
-detinfer agent-run examples/ --json                 # JSON output for CI
-detinfer agent-run examples/ --fail-fast            # Stop on first failure
-
-# ══════════════════════════════════════
-# INFO
-# ══════════════════════════════════════
-
-detinfer info                                       # Show GPU and environment details
-```
+- NVIDIA GPU (recommended) or CPU
 
 ---
 
-## Inference
+## Quick Start
 
-### Runtime Enforcement
+### One-line determinism
+
+```python
+import detinfer
+detinfer.enforce(seed=42)
+
+# Everything after this line is deterministic
+output = model(input)  # Same input = same output, every time
+```
+
+### Run from CLI
+
+```bash
+# Interactive deterministic inference
+detinfer run <hf-model>
+
+# Verify determinism (runs 5 times, checks all match)
+detinfer verify <hf-model>
+
+# Multi-turn deterministic agent
+detinfer agent <hf-model>
+```
+
+Replace `<hf-model>` with any HuggingFace model name.
+
+---
+
+## Part 1: Inference
+
+The inference module enforces deterministic runtime settings and provides tools to verify, benchmark, and export deterministic proofs.
+
+### 1.1 Runtime Enforcement
 
 ```python
 import detinfer
 
-# Apply deterministic runtime settings for supported workflows
 detinfer.enforce(seed=42)
 ```
 
-This locks RNG seeds, disables cuDNN benchmarking, enables `torch.use_deterministic_algorithms`, and sets cuBLAS workspace config.
+This single call:
 
-### DeterministicEngine
+- Locks Python, NumPy, PyTorch, and CUDA random seeds
+- Disables cuDNN autotuning
+- Enables `torch.use_deterministic_algorithms(True)`
+- Configures cuBLAS workspace
+
+### 1.2 DeterministicEngine
 
 ```python
 from detinfer import DeterministicEngine
 
-# Load any HuggingFace model + apply deterministic runtime settings
 engine = DeterministicEngine(seed=42)
-engine.load("<model>")  # Any HuggingFace CausalLM model
+engine.load("<hf-model>")
 
-# Run inference under deterministic settings
 result = engine.run("Write hello world in Python")
 print(result.text)            # The generated text
 print(result.canonical_hash)  # SHA-256 hash for verification
 ```
 
-### Verify Determinism
+### 1.3 Verify Determinism
+
+Run the same prompt multiple times and verify all outputs match:
 
 ```python
 result = engine.verify(num_runs=5)
@@ -191,47 +170,49 @@ print(result)
 # DETERMINISTIC: All 5 runs produced identical output
 ```
 
+CLI:
+
 ```bash
-detinfer verify <model>         # CLI version
-detinfer verify <model> --runs 10
+detinfer verify <hf-model>
+detinfer verify <hf-model> --runs 10
 ```
 
-### Benchmark
+### 1.4 Benchmark
 
-Tests determinism across 8 categories of prompts (auto-scales based on model size):
+Tests determinism across 8 categories of prompts (auto-scales by model size):
 
 ```bash
-detinfer benchmark <model>
+detinfer benchmark <hf-model>
 ```
 
 | Tier | Category | What it tests |
 |------|----------|--------------|
-| 1 | Sanity | Basic questions (baseline check) |
+| 1 | Sanity | Basic questions |
 | 2 | Long output | 200+ token generations |
-| 3 | Uncertain | Creative prompts (low confidence) |
+| 3 | Uncertain | Creative prompts |
 | 4 | Complex code | Merge sort, LRU cache |
-| 5 | Reasoning | Logic puzzles, step-by-step |
+| 5 | Reasoning | Logic puzzles |
 | 6 | Deep context | Long code + passage analysis |
 | 7 | Adversarial | Designed to break determinism |
-| 8 | Edge cases | Unicode, empty, special characters |
+| 8 | Edge cases | Unicode, empty, special chars |
 
-### Scan for Non-Deterministic Ops
-
-```bash
-detinfer scan <model>        # Detects Dropout, Flash Attention, etc.
-```
-
-### Before vs After Comparison
+### 1.5 Scan for Non-Deterministic Ops
 
 ```bash
-detinfer compare <model>     # Runs without detinfer, then with detinfer
+detinfer scan <hf-model>        # Detects Dropout, Flash Attention, etc.
 ```
 
-### Cross-GPU Verification
+### 1.6 Before vs After Comparison
+
+```bash
+detinfer compare <hf-model>     # Runs without detinfer, then with detinfer
+```
+
+### 1.7 Cross-GPU Verification
 
 ```bash
 # Machine A: export proof
-detinfer export <model> -o proof.json
+detinfer export <hf-model> -o proof.json
 
 # Transfer proof.json to Machine B
 
@@ -239,7 +220,7 @@ detinfer export <model> -o proof.json
 detinfer cross-verify proof.json
 ```
 
-### Training Verification
+### 1.8 Training Verification
 
 ```python
 import detinfer
@@ -255,99 +236,76 @@ for step, batch in enumerate(dataloader):
     print(f"Step {step}: {h}")
 ```
 
+### 1.9 Health Check
+
+```bash
+detinfer doctor <hf-model>          # Full determinism audit
+detinfer doctor <hf-model> --json   # JSON for CI pipelines
+```
+
 ---
 
-## Agent
+## Part 2: Agent
 
-### Deterministic Agent
+The agent module provides multi-turn deterministic conversations with full token tracing, replay, and diff.
 
-Deterministic agent sessions with replayable execution traces.
-
-Both `chat()` and `chat_stream()` use manual token-by-token generation with deterministic argmax (smallest-token-ID tie-breaking).
+### 2.1 Deterministic Agent
 
 ```python
 from detinfer import DeterministicAgent
 
-# Multi-turn deterministic agent (works with any HuggingFace model)
-agent = DeterministicAgent("<model>", seed=42)
+agent = DeterministicAgent("<hf-model>", seed=42)
 response = agent.chat("What is 2+2?")
 print(response)
 
 # With system prompt
 agent = DeterministicAgent(
-    "<model>",
+    "<hf-model>",
     seed=42,
     system_prompt="You are a math tutor"
 )
 response = agent.chat("What is calculus?")
-
-# Streaming output (tokens appear one by one)
-for chunk in agent.chat_stream("Explain gravity"):
-    print(chunk, end="", flush=True)
-
-# Export full session trace
-agent.export_session("session.json")
 ```
 
-### Agent Step Replay (Tool Call Tracing)
+Both `chat()` and `chat_stream()` use manual token-by-token generation with deterministic argmax (smallest-token-ID tie-breaking).
 
-Register tools and call them — every call is recorded in the trace for replay and diffing.
+### 2.2 Streaming
 
 ```python
-from detinfer import DeterministicAgent
+for chunk in agent.chat_stream("Explain gravity"):
+    print(chunk, end="", flush=True)
+```
 
-agent = DeterministicAgent("<model>", seed=42)
+### 2.3 Tool Calls
 
-# Register tools (only name + callable, never serialized)
+Register tools and call them -- every call is recorded in the trace:
+
+```python
 agent.register_tool("calculator", lambda expression: str(eval(expression)))
 agent.register_tool("lookup", lambda query: f"Result for: {query}")
 
-# Use tools — recorded as agent steps
 response = agent.chat("What is 2+2?")
 result = agent.call_tool("calculator", {"expression": "2+2"})
 response = agent.chat(f"The answer is {result}. Explain why.")
 
 # Checkpoint key decision points
 agent.checkpoint({"decision": "used_calculator", "confidence": "high"})
-
-agent.export_session("agent_session.json")
 ```
 
-The exported trace includes `agent_steps`:
+### 2.4 Export Session
 
-```json
-{
-  "agent_steps": [
-    {"step": 1, "type": "llm_generation", "turn": 1, "generation_turn": 1},
-    {"step": 2, "type": "tool_call", "turn": 1, "tool": "calculator", "arguments": {"expression": "2+2"}},
-    {"step": 3, "type": "tool_result", "turn": 1, "tool": "calculator", "result": "4"},
-    {"step": 4, "type": "llm_generation", "turn": 2, "generation_turn": 2},
-    {"step": 5, "type": "checkpoint", "turn": 2, "checkpoint_data": {"decision": "used_calculator"}}
-  ],
-  "registered_tools": ["calculator", "lookup"]
-}
+```python
+agent.export_session("session.json")
 ```
 
-`detinfer diff` now detects tool call divergence:
-
-```
-Trace comparison: DIFFERENT
-  First mismatch: turn 2
-  Type: tool_name
-  Expected: calculator
-  Observed: web_search
-```
-
-### Session Export & Trace
-
-Exported sessions contain:
+The exported trace contains:
 
 ```json
 {
   "schema_version": "1",
   "trace_type": "agent",
   "trace_mode": "standard",
-  "model": "<model>",
+  "model": "<hf-model>",
   "seed": 42,
   "session_hash": "a1b2c3...",
   "messages": [
@@ -373,109 +331,61 @@ Exported sessions contain:
 
 With `--trace-mode verbose`, each step also includes `top_tokens` and `top_scores` (top-10 candidates).
 
-### Trace Modes
+### 2.5 Trace Modes
 
-Three levels of trace detail — all produce the same canonical session hash:
+Three levels of trace detail -- all produce the same canonical session hash:
 
-| Mode | What's captured | Use case |
-|------|----------------|----------|
+| Mode | What is captured | Use case |
+|------|-----------------|----------|
 | `minimal` | Hashes + output tokens only | CI, benchmarks |
 | `standard` | + rendered prompt, input tokens, step trace | Replay, debugging |
 | `verbose` | + top-k tokens and scores per step | Deep diagnosis |
 
 ```bash
-detinfer agent <model> --trace-mode minimal    # Lightweight
-detinfer agent <model> --trace-mode verbose    # Full detail
+detinfer agent <hf-model> --trace-mode minimal
+detinfer agent <hf-model> --trace-mode verbose
 ```
 
-### Deterministic Truncation
+### 2.6 Replay
 
-When conversations exceed the context window, detinfer uses a deterministic truncation policy:
-
-- System prompt is **never** dropped
-- Latest user message is **never** dropped
-- Oldest turns are dropped first (user+assistant pairs together)
-- Every truncation event is recorded in the trace
-
-```python
-agent = DeterministicAgent(
-    "<model>", seed=42,
-    max_context_tokens=2048  # Truncate when prompt exceeds 2048 tokens
-)
-```
-
-Same history + same policy = same truncation = same output. This prevents hidden non-determinism from framework-specific truncation.
-
-### Session Save & Resume
-
-Save agent state mid-conversation and resume later:
-
-```python
-# Save
-agent.save_state("agent_state.json")
-
-# Resume (same model must be loaded)
-agent.load_state("agent_state.json")
-response = agent.chat("Continue where we left off")
-```
-
-CLI:
-```bash
-detinfer agent <model> --save-state state.json    # Save on exit
-detinfer agent <model> --load-state state.json    # Resume
-```
-
-### Trace Type Separation
-
-Inference and agent traces are clearly labeled in the JSON:
-
-```json
-{"trace_type": "inference", ...}   // from detinfer export
-{"trace_type": "agent", ...}       // from detinfer agent --export
-```
-
-`detinfer check` will catch if you accidentally compare an inference trace against an agent trace (`TYPE_MISMATCH`).
-
-### Replay & Verification
-
-`detinfer replay` re-runs a saved session and verifies prompt hashes, input tokens, output tokens, and stop conditions.
+Re-run a saved session and verify it produces the same output:
 
 ```bash
-detinfer replay run.json
-detinfer replay run.json --strict
+detinfer replay session.json
+detinfer replay session.json --strict    # Step-by-step verification
 ```
 
-If a divergence occurs, the first mismatch is reported.
+### 2.7 Diff
 
-### Session Diffing
-
-`detinfer diff` compares two saved sessions and reports the first divergence point at the token/step level.
+Compare two sessions and find the first divergence:
 
 ```bash
 detinfer diff run_a.json run_b.json
 ```
 
-### Session Proof Verification
+### 2.8 Verify Session
+
+Verify a session trace as a deterministic execution proof:
 
 ```bash
 detinfer verify-session session.json
 ```
 
 ```
-  ══════════════════════════════════════════════════════════════
+  ======================================================
     DETERMINISTIC EXECUTION PROOF VERIFICATION
-  ══════════════════════════════════════════════════════════════
+  ======================================================
 
-    Model:        <model>
+    Model:        <hf-model>
     Seed:         42
     Turns:        3
 
-    ✓ VERIFIED — All 3 turns match exactly
-    ✓ This session is a valid deterministic execution proof.
-  ══════════════════════════════════════════════════════════════
+    [PASS] VERIFIED -- All 3 turns match exactly
+    [PASS] This session is a valid deterministic execution proof.
+  ======================================================
 ```
 
-### Regression Check
+### 2.9 Regression Check
 
 Compare two session traces and classify exactly what changed:
 
@@ -486,23 +396,16 @@ detinfer check baseline.json candidate.json
 ```
 Detinfer Regression Report
 --------------------------
-Baseline:  baseline.json
-Candidate: candidate.json
-
 Status: FAILED
 Primary type: TOKENIZER_DRIFT
 
 Matched:
-  ✓ model
-  ✓ seed
-  ✓ generation_config
+  [OK] model
+  [OK] seed
+  [OK] generation_config
 
 Changed:
-  ✗ tokenizer.tokenizer_hash
-
-First mismatch:
-  type:  TOKENIZER_DRIFT
-  field: tokenizer.tokenizer_hash
+  [FAIL] tokenizer.tokenizer_hash
 ```
 
 Mismatch types:
@@ -521,15 +424,57 @@ Mismatch types:
 | `ENVIRONMENT_DRIFT` | warning | Torch/Python version changed |
 | `TRACE_DETAIL_DRIFT` | info | Verbose-only fields differ |
 
-### Agent Harness
-
-Automated harness that loads task definitions, runs the agent loop, collects results, and exports traces.
+CI flags:
 
 ```bash
-detinfer agent-run task.json
+detinfer check a.json b.json --json                    # JSON output for CI
+detinfer check a.json b.json --fail-on OUTPUT_DRIFT    # Fail on specific type
+detinfer check a.json b.json --allow ENVIRONMENT_DRIFT # Ignore env changes
 ```
 
-Task file (`task.json`):
+### 2.10 Deterministic Truncation
+
+When conversations exceed the context window:
+
+- System prompt is **never** dropped
+- Latest user message is **never** dropped
+- Oldest turns are dropped first (user+assistant pairs together)
+- Every truncation event is recorded in the trace
+
+```python
+agent = DeterministicAgent(
+    "<hf-model>", seed=42,
+    max_context_tokens=2048
+)
+```
+
+### 2.11 Save and Resume
+
+```python
+# Save
+agent.save_state("agent_state.json")
+
+# Resume (same model must be loaded)
+agent.load_state("agent_state.json")
+response = agent.chat("Continue where we left off")
+```
+
+CLI:
+
+```bash
+detinfer agent <hf-model> --save-state state.json
+detinfer agent <hf-model> --load-state state.json
+```
+
+---
+
+## Part 3: Agent Harness
+
+The harness automates agent testing. Define tasks as JSON, run them, compare against baselines.
+
+### 3.1 Define a Task
+
+Create a JSON file:
 
 ```json
 {
@@ -542,9 +487,6 @@ Task file (`task.json`):
     "max_new_tokens": 64,
     "do_sample": false
   },
-  "tools": [
-    {"name": "calculator", "mock_result": "4"}
-  ],
   "expected": {
     "match": "contains",
     "value": "4"
@@ -552,16 +494,18 @@ Task file (`task.json`):
 }
 ```
 
-Compare against a known-good baseline:
+### 3.2 Run a Task
 
 ```bash
-detinfer agent-run task.json --against baseline.json
+detinfer agent-run task.json
 ```
 
-Run a suite of tasks:
+### 3.3 Run a Suite
+
+Put multiple JSON files in a directory:
 
 ```bash
-detinfer agent-run examples/ --output-dir runs/
+detinfer agent-run examples/
 ```
 
 Output:
@@ -570,18 +514,29 @@ Output:
 Agent Harness Report
 ====================
 
-  ✓ basic_math (42ms)
-  ✓ python_function (85ms)
-  ✓ explain_gravity (71ms)
+  [PASS] basic_math (42ms)
+  [PASS] python_function (85ms)
+  [PASS] explain_gravity (71ms)
 
 Total: 3  |  Passed: 3  |  Failed: 0  |  Errors: 0
 Duration: 198ms
-Manifest: runs/manifest.json
 ```
 
-The harness uses the **same SessionTrace format** as `chat()` — all `replay`, `diff`, and `check` tools work on harness traces.
+### 3.4 Compare Against Baseline
 
-Expected match modes:
+```bash
+detinfer agent-run task.json --against baseline.json
+```
+
+### 3.5 Export Traces
+
+```bash
+detinfer agent-run examples/ --output-dir runs/
+```
+
+The harness uses the same `SessionTrace` format -- all replay, diff, and check tools work on harness output.
+
+### 3.6 Expected Match Modes
 
 | Mode | Behavior |
 |------|----------|
@@ -589,7 +544,23 @@ Expected match modes:
 | `contains` | Output must contain value as substring |
 | `regex` | Output must match regex pattern |
 
-#### Example Tasks
+### 3.7 Task Schema Fields
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | yes | -- | Task name |
+| `model` | yes | -- | HuggingFace model name |
+| `prompt` | yes | -- | Initial prompt |
+| `seed` | no | 42 | Random seed |
+| `max_turns` | no | 1 | Max conversation turns |
+| `system_prompt` | no | -- | System prompt |
+| `follow_ups` | no | [] | Follow-up prompts for multi-turn |
+| `generation_config` | no | greedy | Generation configuration |
+| `tools` | no | [] | Mock tools to register |
+| `expected` | no | -- | Expected output matcher |
+| `tags` | no | [] | Tags for filtering |
+
+### 3.8 Example Tasks
 
 The repo includes example tasks in `examples/`:
 
@@ -604,131 +575,118 @@ The repo includes example tasks in `examples/`:
 
 ---
 
-## CLI Reference
-
-### `detinfer agent`
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--prompt` | — | Non-interactive mode (single question) |
-| `--system` | — | System prompt (e.g., "You are a math tutor") |
-| `--seed` | 42 | Random seed |
-| `--max-tokens` | 256 | Max tokens per turn |
-| `--device` | auto | Device (cpu, cuda, auto) |
-| `--export` | — | Export session trace to JSON |
-| `--quantize` | — | Quantization mode (`int8`, experimental) |
-| `--trace-mode` | standard | Trace detail: `minimal`, `standard`, `verbose` |
-| `--max-context-tokens` | — | Max prompt tokens before truncation |
-| `--save-state` | — | Save agent state to file on exit |
-| `--load-state` | — | Resume from a saved agent state file |
-
-### `detinfer check`
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--json` | off | Output report as JSON |
-| `--fail-on` | — | Mismatch type that should fail (repeatable) |
-| `--allow` | — | Mismatch type to ignore (repeatable) |
-
-### `detinfer agent-run`
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--output-dir` | — | Directory for trace output files |
-| `--against` | — | Baseline trace to compare against |
-| `--json` | off | Output report as JSON |
-| `--fail-fast` | off | Stop suite on first failure |
-
-### `detinfer verify-session`
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--strict` | off | Verify every generation step |
-| `--model` | — | Override model |
-
-### `detinfer replay`
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--strict` | off | Step-by-step verification |
-| `--model` | — | Override model |
-
-### `detinfer verify`
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--runs` | 5 | Number of runs to compare |
-| `--seed` | 42 | Random seed |
-
----
-
 ## How It Works
 
 detinfer applies deterministic runtime settings for 7 sources of non-determinism:
 
-| Source | Problem | detinfer Setting |
-|--------|---------|-----------------|
+| Source | Problem | detinfer fix |
+|--------|---------|-------------|
 | Random seeds | Separate RNGs in Python, NumPy, PyTorch, CUDA | Locks all seeds in one call |
-| CUDA atomics | `scatter_add`, `index_add` use non-deterministic `atomicAdd` | Enables `torch.use_deterministic_algorithms(True)` |
-| Flash Attention | `scaled_dot_product_attention` is non-deterministic | Replaces with deterministic math backend |
+| CUDA atomics | Non-deterministic `atomicAdd` operations | Enables `torch.use_deterministic_algorithms(True)` |
+| Flash Attention | Non-deterministic `scaled_dot_product_attention` | Replaces with deterministic math backend |
 | cuDNN tuning | Auto-selects different algorithms per run | Disables benchmark mode |
-| cuBLAS workspace | Matrix multiplications vary with workspace config | Sets `CUBLAS_WORKSPACE_CONFIG=:4096:8` |
-| Float ordering | Different GPUs may produce different float results | Canonicalizes outputs before hashing |
-| LLM decoding | `temperature`, `top_k`, `top_p` add randomness | Uses deterministic argmax with stable tie-breaking |
+| cuBLAS workspace | Matrix multiply results vary with workspace | Sets `CUBLAS_WORKSPACE_CONFIG=:4096:8` |
+| Float ordering | Different GPUs produce different float results | Canonicalizes outputs before hashing |
+| LLM decoding | Temperature and sampling add randomness | Uses deterministic argmax with stable tie-breaking |
 
 ---
 
-## Architecture
+## CLI Reference
 
+### All Commands
+
+```bash
+# INFERENCE
+detinfer run <hf-model>                              # Interactive deterministic inference
+detinfer run <hf-model> --seed 42 --max-tokens 512   # Custom seed and token limit
+detinfer verify <hf-model>                           # Run 5 times, compare hashes
+detinfer verify <hf-model> --runs 10                 # Custom number of runs
+detinfer scan <hf-model>                             # Scan for non-deterministic ops
+detinfer compare <hf-model>                          # Before vs after comparison
+detinfer benchmark <hf-model>                        # Full benchmark
+detinfer export <hf-model> -o proof.json             # Export proof
+detinfer cross-verify proof.json                     # Verify proof from another machine
+detinfer doctor <hf-model>                           # Determinism health check
+detinfer doctor <hf-model> --json                    # JSON report for CI
+
+# AGENT
+detinfer agent <hf-model>                            # Multi-turn deterministic agent
+detinfer agent <hf-model> --prompt "What is 2+2?"    # Non-interactive
+detinfer agent <hf-model> --system "You are a tutor" # System prompt
+detinfer agent <hf-model> --export session.json      # Export session trace
+detinfer agent <hf-model> --trace-mode verbose       # Record top-k tokens
+detinfer agent <hf-model> --save-state state.json    # Save state on exit
+detinfer agent <hf-model> --load-state state.json    # Resume from state
+detinfer replay session.json                         # Replay saved session
+detinfer replay session.json --strict                # Step-by-step verify
+detinfer verify-session session.json                 # Verify as proof
+detinfer diff run_a.json run_b.json                  # Token-level diff
+
+# REGRESSION CHECK
+detinfer check baseline.json candidate.json          # Compare traces
+detinfer check a.json b.json --json                  # JSON output
+detinfer check a.json b.json --fail-on OUTPUT_DRIFT  # Fail on specific type
+detinfer check a.json b.json --allow ENVIRONMENT_DRIFT
+
+# AGENT HARNESS
+detinfer agent-run task.json                         # Run single task
+detinfer agent-run examples/                         # Run task suite
+detinfer agent-run task.json --against baseline.json # Compare against baseline
+detinfer agent-run examples/ --output-dir runs/      # Export traces
+detinfer agent-run examples/ --json                  # JSON output
+detinfer agent-run examples/ --fail-fast             # Stop on first failure
+
+# INFO
+detinfer info                                        # GPU and environment details
 ```
-detinfer/
-  __init__.py       # Top-level API: enforce(), status(), checkpoint_hash()
-  cli.py            # CLI entry point (16 commands)
-  check.py          # Regression check: compare two traces, classify drift
 
-  inference/        # Deterministic inference library
-    config.py       # Seed locking + deterministic flags
-    enforcer.py     # Runtime op patching (Dropout, Flash Attention)
-    canonicalizer.py # Cross-hardware output normalization
-    guardian.py     # Environment fingerprinting + compatibility
-    engine.py       # High-level DeterministicEngine for LLMs
-    benchmark.py    # Auto-scaling benchmark suite (8 tiers, 36 prompts)
-    proof.py        # Cross-GPU proof export/import/verify
-    detector.py     # Static model scanning
-    verifier.py     # Hash-based verification
-    wrapper.py      # Simple HuggingFace wrapper
-    utils.py        # Hashing + env snapshots
+### Flag Reference
 
-  agent/            # Deterministic agent system
-    runtime.py      # DeterministicAgent — multi-turn with truncation + save/resume
-    trace.py        # Token-level trace recording + session schema + trace modes
-    replay.py       # Session replay verification + diff
+#### `detinfer agent`
 
-  harness/          # Agent harness for automated task execution
-    task_schema.py  # Task definition loading + validation
-    runner.py       # HarnessRunner — task/suite execution + baseline comparison
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--prompt` | -- | Non-interactive mode |
+| `--system` | -- | System prompt |
+| `--seed` | 42 | Random seed |
+| `--max-tokens` | 256 | Max tokens per turn |
+| `--device` | auto | Device (cpu, cuda, auto) |
+| `--export` | -- | Export session trace to JSON |
+| `--quantize` | -- | Quantization mode (`int8`) |
+| `--trace-mode` | standard | Trace detail level |
+| `--max-context-tokens` | -- | Max prompt tokens before truncation |
+| `--save-state` | -- | Save agent state on exit |
+| `--load-state` | -- | Resume from saved state |
 
-examples/           # Example harness task files
-  basic_math.json
-  python_function.json
-  explain_gravity.json
-  tool_calculator.json
-  long_reasoning.json
-  multi_turn_math.json
-```
+#### `detinfer check`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | off | JSON output |
+| `--fail-on` | -- | Mismatch type that causes failure |
+| `--allow` | -- | Mismatch type to ignore |
+
+#### `detinfer agent-run`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output-dir` | -- | Trace output directory |
+| `--against` | -- | Baseline trace to compare |
+| `--json` | off | JSON output |
+| `--fail-fast` | off | Stop on first failure |
 
 ---
 
 ## API Reference
 
-### Top-Level API
+### Top-Level
 
 ```python
 import detinfer
 
-detinfer.enforce(seed=42)              # Apply deterministic runtime settings
-detinfer.status()                       # Check enforcement state
-detinfer.checkpoint_hash(model)         # Hash model weights (for training)
+detinfer.enforce(seed=42)          # Apply deterministic runtime settings
+detinfer.status()                   # Check enforcement state
+detinfer.checkpoint_hash(model)     # Hash model weights (for training)
 ```
 
 ### DeterministicEngine
@@ -736,9 +694,9 @@ detinfer.checkpoint_hash(model)         # Hash model weights (for training)
 | Method | Description |
 |--------|-------------|
 | `DeterministicEngine(seed, precision, device)` | Create engine |
-| `.load(model_name)` | Load HuggingFace model, apply deterministic settings |
-| `.load(model_name, quantize="int8")` | Load with INT8 quantization (experimental) |
-| `.run(prompt, max_new_tokens)` | Run inference under deterministic settings |
+| `.load(model_name)` | Load model, apply deterministic settings |
+| `.load(model_name, quantize="int8")` | Load with INT8 quantization |
+| `.run(prompt, max_new_tokens)` | Run inference |
 | `.verify(prompt, num_runs)` | Run N times, compare hashes |
 | `.scan()` | Show enforcement report |
 
@@ -746,46 +704,46 @@ detinfer.checkpoint_hash(model)         # Hash model weights (for training)
 
 | Method | Description |
 |--------|-------------|
-| `DeterministicAgent(model, seed, system_prompt, max_context_tokens)` | Create agent |
-| `.chat(message)` | Send message, get response (deterministic argmax) |
-| `.chat_stream(message)` | Stream tokens as generated |
+| `DeterministicAgent(model, seed, system_prompt)` | Create agent |
+| `.chat(message)` | Send message, get response |
+| `.chat_stream(message)` | Stream tokens |
 | `.register_tool(name, fn)` | Register a callable tool |
-| `.call_tool(name, args)` | Call tool and record in trace |
-| `.checkpoint(data)` | Record a checkpoint event |
-| `.export_session(path)` | Export full token trace to JSON |
+| `.call_tool(name, args)` | Call tool, record in trace |
+| `.checkpoint(data)` | Record checkpoint event |
+| `.export_session(path)` | Export full token trace |
 | `.get_session_hash()` | Get canonical session hash |
-| `.save_state(path)` | Save full agent state for resume |
-| `.load_state(path)` | Resume agent from saved state |
+| `.save_state(path)` | Save agent state |
+| `.load_state(path)` | Resume from saved state |
 
 ### Regression Check
 
 | Function | Description |
 |----------|-------------|
-| `check_sessions(baseline, candidate)` | Compare two trace dicts, classify mismatches |
-| `render_check_report(report)` | Human-readable regression report |
+| `check_sessions(baseline, candidate)` | Compare two trace dicts |
+| `render_check_report(report)` | Human-readable report |
 
 ### Agent Harness
 
 | Function | Description |
 |----------|-------------|
 | `HarnessRunner(output_dir, against)` | Create harness runner |
-| `runner.run_task(task)` | Run a single task, return `TaskResult` |
-| `runner.run_suite(tasks)` | Run a suite, return `SuiteResult` |
-| `load_task(path)` | Load a task definition from JSON |
-| `load_task_suite(dir_path)` | Load all tasks from a directory |
+| `runner.run_task(task)` | Run single task |
+| `runner.run_suite(tasks)` | Run task suite |
+| `load_task(path)` | Load task from JSON |
+| `load_task_suite(dir_path)` | Load all tasks from directory |
 
-### Replay & Diff
+### Replay and Diff
 
 | Function | Description |
 |----------|-------------|
-| `replay_session(trace_path)` | Re-run session, verify token-by-token |
-| `diff_sessions(path_a, path_b)` | Compare two traces, find first mismatch |
+| `replay_session(trace_path)` | Re-run session, verify tokens |
+| `diff_sessions(path_a, path_b)` | Find first mismatch |
 
 ---
 
 ## GitHub Action
 
-Add determinism verification to your CI pipeline:
+Add determinism verification to CI:
 
 ```yaml
 # .github/workflows/determinism.yml
@@ -807,48 +765,81 @@ jobs:
 
 ---
 
-## Support Status
+## Compatibility
 
 ### Supported
 
-- Single-process HuggingFace causal LM inference
-- Deterministic agent session export and replay
-- Token-level diffing for saved sessions
-- Greedy decoding paths under controlled runtime settings
+| Feature | Status | Notes |
+|---------|--------|-------|
+| PyTorch eager mode | Supported | Default execution mode |
+| Greedy decoding | Supported | Enforced via deterministic argmax |
+| fp32 / fp16 inference | Supported | Deterministic on supported backends |
+| CPU inference | Supported | Fully deterministic |
+| NVIDIA GPU (single) | Supported | T4, V100, A100, RTX 3070/4090, etc. |
+| HuggingFace CausalLM | Supported | Any CausalLM on HuggingFace Hub |
+
+### Partially Supported
+
+| Feature | Notes |
+|---------|-------|
+| bf16 inference | Hardware-dependent rounding may differ |
+| Multi-GPU (`device_map="auto"`) | May have split-order edge cases |
+| Flash Attention | Auto-replaced with MATH backend |
 
 ### Experimental
 
-- INT8 quantized mode (may improve consistency, not guaranteed bitwise identical)
-- Cross-device consistency checks
-- Streaming/verbose trace paths
+| Feature | Notes |
+|---------|-------|
+| INT8 (bitsandbytes) | May improve consistency |
 
-### Not Guaranteed
+### Not Supported
 
-- Universal determinism for arbitrary PyTorch code
-- Bitwise-identical results across all GPU architectures
-- Distributed training or asynchronous multi-node systems
-- External API or tool call determinism
+| Feature | Reason |
+|---------|--------|
+| GPTQ/AWQ quantization | Kernel-specific rounding |
+| `torch.compile` | Graph autotuning |
+| Beam search | Tie-breaking is implementation-specific |
+| vLLM / paged attention | KV cache paging |
+| AMD GPUs (ROCm) | Untested |
+| Apple Silicon (MPS) | Untested |
 
-### Detailed Compatibility
+---
 
-| Feature | Status | Notes |
-|---|---|---|
-| PyTorch eager mode | **Supported** | Default execution mode |
-| Greedy decoding | **Supported** | Enforced via deterministic argmax |
-| fp32 / fp16 inference | **Supported** | Deterministic on supported backends |
-| CPU inference | **Supported** | Fully deterministic |
-| NVIDIA GPU (single) | **Supported** | T4, V100, A100, RTX 3070/4090, etc. |
-| HuggingFace CausalLM | **Supported** | GPT-2, Qwen, TinyLlama, LLaMA, etc. |
-| bf16 inference | Partial | Hardware-dependent rounding may differ |
-| Multi-GPU (`device_map="auto"`) | Partial | May have split-order edge cases |
-| Flash Attention | Partial | Auto-replaced with MATH backend |
-| INT8 (bitsandbytes) | **Experimental** | May improve consistency |
-| GPTQ/AWQ quantization | **Not supported** | Kernel-specific rounding |
-| `torch.compile` | **Not supported** | Graph autotuning |
-| Beam search | **Not supported** | Tie-breaking is implementation-specific |
-| vLLM / paged attention | **Not supported** | KV cache paging |
-| AMD GPUs (ROCm) | Untested | |
-| Apple Silicon (MPS) | Untested | |
+## Architecture
+
+```
+detinfer/
+  __init__.py       # Top-level API: enforce(), status(), checkpoint_hash()
+  cli.py            # CLI entry point (16 commands)
+  check.py          # Regression check: compare two traces, classify drift
+
+  inference/        # Deterministic inference library
+    config.py       # Seed locking + deterministic flags
+    enforcer.py     # Runtime op patching (Dropout, Flash Attention)
+    canonicalizer.py # Cross-hardware output normalization
+    guardian.py     # Environment fingerprinting
+    engine.py       # High-level DeterministicEngine
+    benchmark.py    # Auto-scaling benchmark suite
+    proof.py        # Cross-GPU proof export/verify
+    detector.py     # Static model scanning
+    verifier.py     # Hash-based verification
+    wrapper.py      # Simple HuggingFace wrapper
+    utils.py        # Hashing + env snapshots
+
+  agent/            # Deterministic agent system
+    runtime.py      # DeterministicAgent with truncation + save/resume
+    trace.py        # Token-level trace recording + session schema
+    replay.py       # Session replay verification + diff
+
+  harness/          # Agent harness for automated testing
+    task_schema.py  # Task definition loading + validation
+    runner.py       # HarnessRunner with baseline comparison
+
+examples/           # Example harness task files
+docs/               # Documentation
+  GUIDE.md          # Beginner-friendly guide
+  determinism-spec.md  # Technical determinism specification
+```
 
 ---
 
@@ -859,8 +850,10 @@ pip install "detinfer[dev]"
 pytest tests/ -v
 ```
 
+163 tests covering all modules.
+
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE).

@@ -79,7 +79,7 @@ For detinfer's determinism guarantee to hold, ALL of the following must be true:
 | fp16 inference | Deterministic on supported backends |
 | CPU inference | Fully deterministic |
 | CUDA (single GPU) | Deterministic with enforced flags |
-| HuggingFace CausalLM models | Tested with GPT-2, Qwen, TinyLlama, LLaMA |
+| HuggingFace CausalLM models | Any CausalLM model on HuggingFace Hub |
 | Cross-GPU canonical comparison | Via canonicalized token-level hashes |
 
 ### Partially Supported (best-effort)
