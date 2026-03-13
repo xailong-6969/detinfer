@@ -64,6 +64,8 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
     result = engine.verify(prompt=prompt, num_runs=args.runs)
     print(result)
+    if not result.is_deterministic:
+        sys.exit(1)
 
 
 def cmd_benchmark(args: argparse.Namespace) -> None:
@@ -567,6 +569,7 @@ def cmd_verify_session(args: argparse.Namespace) -> None:
             for d in result.details:
                 print(f"    {d}")
 
+        sys.exit(1)
     print("═" * 60)
 
 

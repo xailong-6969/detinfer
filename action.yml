@@ -129,8 +129,14 @@ runs:
             printf 'passed=false\n' >> "$GITHUB_OUTPUT"
             exit 1
           fi
-          detinfer verify "${INPUT_MODEL}" --seed "${INPUT_SEED}"
-          printf 'passed=true\n' >> "$GITHUB_OUTPUT"
+          if output="$(detinfer verify "${INPUT_MODEL}" --seed "${INPUT_SEED}" 2>&1)"; then
+            printf '%s\n' "$output"
+            printf 'passed=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' "$output"
+            printf 'passed=false\n' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
         else
           echo "Unknown command: $command"
