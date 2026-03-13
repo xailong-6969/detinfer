@@ -1,13 +1,13 @@
-﻿# detinfer
+# detinfer
 
 Deterministic runtime controls, tracing, replay verification, and drift checks for supported LLM workflows.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/xailong-6969/detinfer/blob/main/LICENSE)
 [![PyPI](https://img.shields.io/badge/pypi-v0.3.0-blue.svg)](https://pypi.org/project/detinfer/)
 
-Start here if you want plain-language docs: [docs/GUIDE.md](docs/GUIDE.md)  
-Detailed semantics and guarantees: [docs/determinism-spec.md](docs/determinism-spec.md)
+Start here if you want plain-language docs: [docs/GUIDE.md](https://github.com/xailong-6969/detinfer/blob/main/docs/GUIDE.md)  
+Detailed semantics and guarantees: [docs/determinism-spec.md](https://github.com/xailong-6969/detinfer/blob/main/docs/determinism-spec.md)
 
 ---
 
@@ -254,7 +254,7 @@ Not supported or out of scope:
 - vLLM / paged-attention runtimes
 - ROCm/MPS paths are not validated in this repo
 
-See [docs/determinism-spec.md](docs/determinism-spec.md) for exact assumptions and proof semantics.
+See [docs/determinism-spec.md](https://github.com/xailong-6969/detinfer/blob/main/docs/determinism-spec.md) for exact assumptions and proof semantics.
 
 ---
 
@@ -269,7 +269,8 @@ pytest tests/ -v
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/xailong-6969/detinfer/blob/main/LICENSE).
+
 
 
 

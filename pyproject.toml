@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "detinfer"
 version = "0.3.0"
-description = "detinfer — deterministic runtime controls, session tracing, and replay verification for supported LLM workflows"
+description = "detinfer â€” deterministic runtime controls, session tracing, and replay verification for supported LLM workflows"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -30,10 +30,15 @@ dev = [
     "transformers>=4.30.0",
 ]
 
+
 [tool.setuptools.packages.find]
+include = ["detinfer*"]
+exclude = ["tests*"]
+
 
 [project.scripts]
 detinfer = "detinfer.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
