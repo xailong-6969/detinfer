@@ -86,17 +86,16 @@ fi
 # Step 4: Prompt for model name
 # ============================================================================
 echo ""
-echo -en "${GREEN}>> Enter the model name in huggingface repo/name format"
-echo -en " (e.g., owner/model-name),"
-echo -e  " or press [Enter] for default:${RESET}"
+echo -en "${GREEN}>> Enter the model name in HuggingFace repo/name format"
+echo -e  " (e.g., owner/model-name):${RESET}"
 read -p "> " MODEL_NAME
 
 if [ -z "$MODEL_NAME" ]; then
-    echo_green ">> No model specified. Please provide a HuggingFace model name."
+    echo_red ">> A HuggingFace model name is required."
     exit 1
-else
-    echo_green ">> Using model: $MODEL_NAME"
 fi
+
+echo_green ">> Using model: $MODEL_NAME"
 
 # ============================================================================
 # Step 5: Prompt for seed
