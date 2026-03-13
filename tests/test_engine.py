@@ -65,3 +65,18 @@ def test_load_model_skips_move_for_quantized(monkeypatch):
     assert model.to_called is False
     assert engine._multi_gpu is False
     assert str(engine._get_input_device()) == str(model.linear.weight.device)
+
+
+def test_load_model_applies_deterministic_config(monkeypatch):
+    """Preloaded models should still enable deterministic runtime settings."""
+    engine = _make_engine(monkeypatch)
+    model = TrackToModel()
+    applied = {"count": 0}
+
+    def fake_apply():
+        applied["count"] += 1
+
+    monkeypatch.setattr(engine.config, "apply", fake_apply)
+    engine.load_model(model)
+
+    assert applied["count"] == 1

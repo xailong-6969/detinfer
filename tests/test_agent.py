@@ -602,3 +602,103 @@ class TestSessionSaveResume:
             assert loaded.session_hash == session.session_hash
         finally:
             os.unlink(path)
+
+
+    def test_save_state_computes_session_hash(self, monkeypatch):
+        """save_state() should persist a usable session hash in the saved trace."""
+        import detinfer.agent.runtime as runtime_mod
+
+        class DummyConfig:
+            def to_dict(self):
+                return {"arch": "dummy"}
+
+        class DummyModel:
+            config = DummyConfig()
+
+        class DummyTokenizer:
+            chat_template = None
+
+            def __len__(self):
+                return 2
+
+            def get_vocab(self):
+                return {"a": 0, "b": 1}
+
+        def fake_load(self, model_name, **kwargs):
+            self.model = DummyModel()
+            self.tokenizer = DummyTokenizer()
+            self.model_name = model_name
+            return None
+
+        monkeypatch.setattr(runtime_mod.DeterministicEngine, "load", fake_load)
+        agent = runtime_mod.DeterministicAgent("test-model", seed=42)
+        agent.session.add_message("user", "hello")
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            path = f.name
+
+        try:
+            agent.save_state(path)
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            assert state["session_trace"]["session_hash"] != ""
+        finally:
+            os.unlink(path)
+
+    def test_load_state_rejects_config_mismatch(self, monkeypatch):
+        """Resuming with a different deterministic config should fail explicitly."""
+        import detinfer.agent.runtime as runtime_mod
+
+        class DummyConfig:
+            def to_dict(self):
+                return {"arch": "dummy"}
+
+        class DummyModel:
+            config = DummyConfig()
+
+        class DummyTokenizer:
+            chat_template = None
+
+            def __len__(self):
+                return 2
+
+            def get_vocab(self):
+                return {"a": 0, "b": 1}
+
+        def fake_load(self, model_name, **kwargs):
+            self.model = DummyModel()
+            self.tokenizer = DummyTokenizer()
+            self.model_name = model_name
+            return None
+
+        monkeypatch.setattr(runtime_mod.DeterministicEngine, "load", fake_load)
+        agent = runtime_mod.DeterministicAgent("test-model", seed=42, max_new_tokens=64)
+
+        session = SessionTrace(model="test-model", seed=99, trace_mode=TraceMode.STANDARD)
+        session.compute_session_hash()
+        state = {
+            "version": 1,
+            "agent_config": {
+                "model_name": "test-model",
+                "seed": 99,
+                "max_new_tokens": 64,
+                "trace_mode": "standard",
+                "quantize": None,
+                "system_prompt": None,
+                "max_context_tokens": None,
+            },
+            "conversation_history": [],
+            "turn_count": 0,
+            "agent_step_counter": 0,
+            "session_trace": session.to_dict(),
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            path = f.name
+            json.dump(state, f, indent=2)
+
+        try:
+            with pytest.raises(ValueError, match="seed"):
+                agent.load_state(path)
+        finally:
+            os.unlink(path)
