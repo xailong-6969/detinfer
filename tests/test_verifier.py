@@ -24,6 +24,58 @@ class TinyModel(nn.Module):
         return self.output(self.relu(self.linear(x)))
 
 
+class DeviceMappedModel(nn.Module):
+    """Model stub that mimics an accelerate-dispatched model."""
+
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(4, 4)
+        self.hf_device_map = {"linear": "cuda:0"}
+        self.to_called = False
+
+    def to(self, *args, **kwargs):
+        self.to_called = True
+        return self
+
+    def forward(self, x):
+        return self.linear(x)
+
+
+class TemplateBatch(dict):
+    def to(self, device):
+        return self
+
+
+class TemplateTokenizer:
+    chat_template = "{{ fake }}"
+
+    def __init__(self):
+        self.last_messages = None
+        self.last_tokenized = None
+
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+        self.last_messages = messages
+        assert tokenize is False
+        assert add_generation_prompt is True
+        return "FORMATTED PROMPT"
+
+    def __call__(self, prompt, return_tensors="pt"):
+        self.last_tokenized = prompt
+        return TemplateBatch({"input_ids": torch.tensor([[1, 2, 3]])})
+
+
+class GenerateOnlyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(1, 1)
+
+    def forward(self, x):
+        return x
+
+    def generate(self, **kwargs):
+        return kwargs["input_ids"]
+
+
 class TestInferenceVerifier:
     """Tests that the verifier correctly identifies deterministic outputs."""
 
@@ -150,4 +202,23 @@ class TestInferenceVerifier:
 
         with pytest.raises(ValueError, match="Tokenizer required"):
             verifier.verify("test prompt")
+
+    def test_device_mapped_model_not_moved(self):
+        """Verifier should not call .to() on device-mapped models."""
+        model = DeviceMappedModel()
+        _ = InferenceVerifier(model, device="cpu")
+        assert model.to_called is False
+
+
+    def test_verify_applies_chat_template(self):
+        """Verification should tokenize the same rendered prompt path as engine.run()."""
+        model = GenerateOnlyModel()
+        tokenizer = TemplateTokenizer()
+
+        verifier = InferenceVerifier(model, tokenizer=tokenizer, device="cpu")
+        result = verifier.verify("hello", num_runs=1, seed=42)
+
+        assert result.is_deterministic
+        assert tokenizer.last_messages == [{"role": "user", "content": "hello"}]
+        assert tokenizer.last_tokenized == "FORMATTED PROMPT"
 

@@ -33,7 +33,7 @@ class DeterministicLLM:
         3. Produce identical output for the same input
 
     Usage:
-        llm = DeterministicLLM("Qwen/Qwen2.5-Coder-0.5B-Instruct", seed=42)
+        llm = DeterministicLLM("<hf-model>", seed=42)
         output = llm.generate("Write hello world in Python")
         # Same output every time
 

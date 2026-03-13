@@ -86,17 +86,16 @@ fi
 # Step 4: Prompt for model name
 # ============================================================================
 echo ""
-echo -en "${GREEN}>> Enter the model name in huggingface repo/name format"
-echo -en " (e.g., Qwen/Qwen2.5-Coder-0.5B-Instruct),"
-echo -e  " or press [Enter] for default:${RESET}"
+echo -en "${GREEN}>> Enter the model name in HuggingFace repo/name format"
+echo -e  " (e.g., owner/model-name):${RESET}"
 read -p "> " MODEL_NAME
 
 if [ -z "$MODEL_NAME" ]; then
-    MODEL_NAME="Qwen/Qwen2.5-Coder-0.5B-Instruct"
-    echo_green ">> Using default model: $MODEL_NAME"
-else
-    echo_green ">> Using model: $MODEL_NAME"
+    echo_red ">> A HuggingFace model name is required."
+    exit 1
 fi
+
+echo_green ">> Using model: $MODEL_NAME"
 
 # ============================================================================
 # Step 5: Prompt for seed

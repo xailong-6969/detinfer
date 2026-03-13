@@ -27,14 +27,16 @@ class DeterministicConfig:
 
     Args:
         seed: Master random seed applied to all RNGs.
-        warn_only: If True, use torch.use_deterministic_algorithms(warn_only=True)
-                   instead of raising errors for non-deterministic ops. Useful when
-                   some layers don't have deterministic GPU implementations.
+        warn_only: If True, enable deterministic algorithms with warn-only
+                   behavior for unsupported ops (logs warnings instead of
+                   raising errors). Useful when some layers don't have
+                   deterministic GPU implementations.
     """
 
     seed: int = 42
     warn_only: bool = False
     _applied: bool = field(default=False, repr=False, init=False)
+    _cublas_was_preset: bool = field(default=False, repr=False, init=False)
 
     def apply(self) -> DeterministicConfig:
         """Lock every source of randomness. Returns self for chaining.
@@ -50,27 +52,40 @@ class DeterministicConfig:
             - torch.backends.cudnn.benchmark = False
             - CUBLAS_WORKSPACE_CONFIG env var (required for CUDA determinism)
         """
-        # Python built-in
+        # Step 1: cuBLAS workspace — set BEFORE any CUDA interaction
+        self._cublas_was_preset = bool(
+            os.environ.get("CUBLAS_WORKSPACE_CONFIG")
+        )
+        if not self._cublas_was_preset and torch.cuda.is_available():
+            import warnings
+            warnings.warn(
+                "CUBLAS_WORKSPACE_CONFIG was not set before process start. "
+                "detinfer set it at runtime (best-effort). For strongest "
+                "guarantees, set CUBLAS_WORKSPACE_CONFIG=:4096:8 in your "
+                "environment before launching Python.",
+                stacklevel=2,
+            )
+        # Always set/enforce the correct value
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
+        # Step 2: Python built-in
         random.seed(self.seed)
         os.environ["PYTHONHASHSEED"] = str(self.seed)
 
-        # NumPy
+        # Step 3: NumPy
         np.random.seed(self.seed)
 
-        # PyTorch CPU + GPU seeds
+        # Step 4: PyTorch CPU + GPU seeds
         torch.manual_seed(self.seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.seed)
 
-        # PyTorch deterministic mode
+        # Step 5: PyTorch deterministic mode
         torch.use_deterministic_algorithms(True, warn_only=self.warn_only)
 
-        # cuDNN
+        # Step 6: cuDNN
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
-        # cuBLAS workspace (needed for torch >= 1.8 deterministic CUDA)
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
         self._applied = True
         return self
@@ -101,7 +116,10 @@ class DeterministicConfig:
             "cudnn_deterministic": torch.backends.cudnn.deterministic,
             "cudnn_benchmark": torch.backends.cudnn.benchmark,
             "cublas_workspace": os.environ.get("CUBLAS_WORKSPACE_CONFIG", ""),
+            "cublas_was_preset": self._cublas_was_preset,
             "pythonhashseed": os.environ.get("PYTHONHASHSEED", ""),
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
         }
 
     def __repr__(self) -> str:

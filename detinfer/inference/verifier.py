@@ -82,7 +82,17 @@ class InferenceVerifier:
         self.model = model
         self.tokenizer = tokenizer
         self.device = torch.device(device)
-        self.model.to(self.device)
+        self._input_device = self._resolve_input_device()
+
+        has_device_map = isinstance(getattr(self.model, "hf_device_map", None), dict)
+        is_quantized = bool(
+            getattr(self.model, "is_loaded_in_8bit", False)
+            or getattr(self.model, "is_loaded_in_4bit", False)
+        )
+        if not has_device_map and not is_quantized:
+            self.model.to(self.device)
+            self._input_device = self.device
+
         self.model.eval()
 
     @torch.no_grad()
@@ -115,7 +125,17 @@ class InferenceVerifier:
                 "for models without a tokenizer."
             )
 
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        formatted_prompt = prompt
+        if hasattr(self.tokenizer, "chat_template") and self.tokenizer.chat_template:
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                formatted_prompt = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+            except Exception:
+                pass
+
+        inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self._input_device)
 
         def run_fn() -> torch.Tensor:
             output_ids = self.model.generate(
@@ -149,7 +169,7 @@ class InferenceVerifier:
         Returns:
             VerificationResult.
         """
-        input_tensor = input_tensor.to(self.device)
+        input_tensor = input_tensor.to(self._input_device)
 
         def run_fn() -> torch.Tensor:
             if forward_fn is not None:
@@ -206,4 +226,19 @@ class InferenceVerifier:
             environment=get_environment_snapshot(),
             seed=seed,
         )
+
+    def _resolve_input_device(self) -> torch.device:
+        """Infer the correct input device, including device-mapped models."""
+        device_map = getattr(self.model, "hf_device_map", None)
+        if isinstance(device_map, dict):
+            for mapped in device_map.values():
+                if isinstance(mapped, int):
+                    return torch.device(f"cuda:{mapped}")
+                if isinstance(mapped, str) and mapped not in {"cpu", "disk", "meta"}:
+                    return torch.device(mapped)
+
+        try:
+            return next(self.model.parameters()).device
+        except StopIteration:
+            return self.device
 

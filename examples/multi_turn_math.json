@@ -1,0 +1,20 @@
+{
+  "name": "multi_turn_math",
+  "description": "Stress: multi-turn conversation with follow-ups",
+  "model": "<hf-model>",
+  "seed": 42,
+  "system_prompt": "You are a math tutor.",
+  "prompt": "What is 60 divided by 3?",
+  "follow_ups": ["Now multiply that result by 5."],
+  "max_turns": 2,
+  "generation_config": {
+    "max_new_tokens": 80,
+    "do_sample": false,
+    "temperature": 0.0
+  },
+  "expected": {
+    "match": "contains",
+    "value": "5"
+  },
+  "tags": ["stress", "multi-turn"]
+}

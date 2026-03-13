@@ -12,7 +12,7 @@ Usage:
     from detinfer import DeterministicEngine
 
     engine = DeterministicEngine(seed=42)
-    engine.load("Qwen/Qwen2.5-Coder-0.5B-Instruct")
+    engine.load("<hf-model>")
 
     result = engine.run("Write hello world in Python")
     print(result.text)
@@ -110,7 +110,7 @@ class DeterministicEngine:
 
     Usage with model name:
         engine = DeterministicEngine(seed=42)
-        engine.load("Qwen/Qwen2.5-Coder-0.5B-Instruct")
+        engine.load("<hf-model>")
         result = engine.run("Write hello world")
 
     Usage with pre-loaded model:
@@ -176,7 +176,7 @@ class DeterministicEngine:
         """Load a HuggingFace model by name and enforce determinism.
 
         Args:
-            model_name: HuggingFace model ID (e.g., "Qwen/Qwen2.5-Coder-0.5B-Instruct").
+            model_name: HuggingFace model ID (e.g., "owner/model-name").
             torch_dtype: Data type for model loading.
             device_map: Device placement strategy for multi-GPU.
                         Use "auto" to split across all available GPUs.
@@ -264,13 +264,23 @@ class DeterministicEngine:
         self.model = model
         self.tokenizer = tokenizer
         self.model_name = model_name or model.__class__.__name__
+        has_device_map = isinstance(getattr(self.model, "hf_device_map", None), dict)
+        is_quantized = bool(
+            getattr(self.model, "is_loaded_in_8bit", False)
+            or getattr(self.model, "is_loaded_in_4bit", False)
+        )
+        self._multi_gpu = has_device_map
 
-        self.model.to(self.device)
+        if not has_device_map and not is_quantized:
+            self.model.to(self.device)
 
         # Enforce determinism
         self.enforcement_report = self.enforcer.enforce(
             self.model, model_name=self.model_name
         )
+
+        # Lock seeds and deterministic backend settings for preloaded models too.
+        self.config.apply()
 
         # Capture environment fingerprint
         self.fingerprint = self.guardian.create_fingerprint()
@@ -333,7 +343,7 @@ class DeterministicEngine:
 
         # Canonicalize
         raw_hash = hash_string(text)
-        canonical = self.canonicalizer.canonicalize(output_ids.float())
+        canonical = self.canonicalizer.canonicalize(output_ids)
 
         # Get backend metadata
         model_dtype = str(next(self.model.parameters()).dtype) if self.model else "unknown"
@@ -425,20 +435,21 @@ class DeterministicEngine:
             device=self.device,
         )
 
-        if input_tensor is not None:
-            return verifier.verify_with_input(
-                input_tensor, num_runs=num_runs, seed=self.seed
-            )
-        elif prompt is not None:
-            return verifier.verify(
-                prompt, num_runs=num_runs, seed=self.seed
-            )
-        else:
-            # Default test prompt
-            default_prompt = "What is 2 + 2? Answer with just the number."
-            return verifier.verify(
-                default_prompt, num_runs=num_runs, seed=self.seed
-            )
+        with self.enforcer.deterministic_context():
+            if input_tensor is not None:
+                return verifier.verify_with_input(
+                    input_tensor, num_runs=num_runs, seed=self.seed
+                )
+            elif prompt is not None:
+                return verifier.verify(
+                    prompt, num_runs=num_runs, seed=self.seed
+                )
+            else:
+                # Default test prompt
+                default_prompt = "What is 2 + 2? Answer with just the number."
+                return verifier.verify(
+                    default_prompt, num_runs=num_runs, seed=self.seed
+                )
 
     def scan(self) -> EnforcementReport:
         """Return the enforcement report from model loading.
@@ -481,13 +492,18 @@ class DeterministicEngine:
         For multi-GPU models, inputs go to the first device in the model's
         device map. For single-device, inputs go to self.device.
         """
-        if self._multi_gpu and self.model is not None:
-            # For models loaded with device_map, get the device of the
-            # first parameter (usually the embedding layer)
-            try:
-                first_param = next(self.model.parameters())
-                return first_param.device
-            except StopIteration:
-                return self.device
+        if self.model is not None:
+            has_device_map = isinstance(getattr(self.model, "hf_device_map", None), dict)
+            is_quantized = bool(
+                getattr(self.model, "is_loaded_in_8bit", False)
+                or getattr(self.model, "is_loaded_in_4bit", False)
+            )
+            if self._multi_gpu or has_device_map or is_quantized:
+                # For dispatched/quantized models, use parameter device directly.
+                try:
+                    first_param = next(self.model.parameters())
+                    return first_param.device
+                except StopIteration:
+                    return self.device
         return self.device
 

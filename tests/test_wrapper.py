@@ -1,6 +1,6 @@
 """Tests for detinfer.wrapper — DeterministicLLM.
 
-Uses a tiny randomly-initialized causal LM model (no downloads).
+Uses a tiny randomly-initialized causal LM for testing (no downloads).
 Requires the 'transformers' package.
 """
 
@@ -8,13 +8,16 @@ import torch
 import pytest
 
 try:
-    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, GPT2Config, GPT2LMHeadModel
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
 
 from detinfer.inference.config import DeterministicConfig
 
+# Smallest available CausalLM architecture for offline tests.
+# This is NOT a model recommendation — detinfer works with any HF model.
+_TEST_ARCH = "gpt2"
 
 # Skip entire module if transformers is not installed
 pytestmark = pytest.mark.skipif(
@@ -23,22 +26,23 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _make_tiny_gpt2():
-    """Create a tiny random GPT-2 model (~1MB) for testing.
+def _make_tiny_test_model():
+    """Create a tiny randomly-initialized causal LM (~1MB) for testing.
 
-    This model is randomly initialized — it produces gibberish text,
-    but that's fine because we only need to verify determinism.
+    The model produces gibberish — we only need it to verify
+    that same input + same seed = same output (determinism).
     """
-    config = GPT2Config(
-        vocab_size=50257,  # Must match GPT-2 tokenizer vocab
+    config = AutoConfig.for_model(
+        _TEST_ARCH,
+        vocab_size=50257,
         n_embd=32,
         n_layer=2,
         n_head=2,
         n_inner=64,
-        max_position_embeddings=128,
+        n_positions=128,
     )
-    model = GPT2LMHeadModel(config)
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    model = AutoModelForCausalLM.from_config(config)
+    tokenizer = AutoTokenizer.from_pretrained(_TEST_ARCH)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     return model, tokenizer
@@ -51,7 +55,7 @@ class TestDeterministicLLM:
         """Same prompt should produce identical output every time."""
         from detinfer.inference.wrapper import DeterministicLLM
 
-        model, tokenizer = _make_tiny_gpt2()
+        model, tokenizer = _make_tiny_test_model()
         llm = DeterministicLLM(
             model=model, tokenizer=tokenizer, seed=42, device="cpu"
         )
@@ -68,7 +72,7 @@ class TestDeterministicLLM:
         """generate_with_hash should return text + SHA-256 hashes."""
         from detinfer.inference.wrapper import DeterministicLLM
 
-        model, tokenizer = _make_tiny_gpt2()
+        model, tokenizer = _make_tiny_test_model()
         llm = DeterministicLLM(
             model=model, tokenizer=tokenizer, seed=42, device="cpu"
         )
@@ -84,7 +88,7 @@ class TestDeterministicLLM:
         """Hashes should be identical across runs."""
         from detinfer.inference.wrapper import DeterministicLLM
 
-        model, tokenizer = _make_tiny_gpt2()
+        model, tokenizer = _make_tiny_test_model()
         llm = DeterministicLLM(
             model=model, tokenizer=tokenizer, seed=42, device="cpu"
         )
@@ -99,7 +103,7 @@ class TestDeterministicLLM:
         """Built-in verify() should confirm determinism."""
         from detinfer.inference.wrapper import DeterministicLLM
 
-        model, tokenizer = _make_tiny_gpt2()
+        model, tokenizer = _make_tiny_test_model()
         llm = DeterministicLLM(
             model=model, tokenizer=tokenizer, seed=42, device="cpu"
         )
@@ -113,7 +117,7 @@ class TestDeterministicLLM:
         """get_info should return model and environment data."""
         from detinfer.inference.wrapper import DeterministicLLM
 
-        model, tokenizer = _make_tiny_gpt2()
+        model, tokenizer = _make_tiny_test_model()
         llm = DeterministicLLM(
             model=model, tokenizer=tokenizer, seed=42, device="cpu"
         )
@@ -128,7 +132,7 @@ class TestDeterministicLLM:
         """Different prompts should (very likely) produce different outputs."""
         from detinfer.inference.wrapper import DeterministicLLM
 
-        model, tokenizer = _make_tiny_gpt2()
+        model, tokenizer = _make_tiny_test_model()
         llm = DeterministicLLM(
             model=model, tokenizer=tokenizer, seed=42, device="cpu"
         )
@@ -145,7 +149,7 @@ class TestDeterministicLLM:
         """repr should be informative."""
         from detinfer.inference.wrapper import DeterministicLLM
 
-        model, tokenizer = _make_tiny_gpt2()
+        model, tokenizer = _make_tiny_test_model()
         llm = DeterministicLLM(
             model=model, tokenizer=tokenizer, seed=42, device="cpu"
         )

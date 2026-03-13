@@ -1,0 +1,19 @@
+{
+  "name": "explain_gravity",
+  "description": "Medium: explanation with system prompt",
+  "model": "<hf-model>",
+  "seed": 42,
+  "system_prompt": "You are a science teacher.",
+  "prompt": "Explain gravity in two sentences.",
+  "max_turns": 1,
+  "generation_config": {
+    "max_new_tokens": 100,
+    "do_sample": false,
+    "temperature": 0.0
+  },
+  "expected": {
+    "match": "contains",
+    "value": "gravity"
+  },
+  "tags": ["medium", "explanation"]
+}

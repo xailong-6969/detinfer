@@ -99,6 +99,8 @@ class OutputCanonicalizer:
 
         if self.precision == Precision.EXACT:
             canonical_tensor = tensor
+        elif self.precision == Precision.TOKEN_LEVEL:
+            canonical_tensor = tensor.detach().cpu().to(torch.int64)
         else:
             decimals = _PRECISION_DECIMALS[self.precision]
             canonical_tensor = self._round_tensor(tensor, decimals)

@@ -8,11 +8,30 @@ and provides JSON serialization for replay and diff.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import sys
 from dataclasses import dataclass, field, asdict
+from enum import Enum
 from typing import Any
+
+
+class TraceMode(str, Enum):
+    """Trace detail levels.
+
+    minimal  = proof only (CI, benchmarks, sharing)
+    standard = replay/debugging (default for local use)
+    verbose  = deep diagnosis (top-k tokens, full env)
+
+    IMPORTANT: The canonical session hash is computed from the same
+    core fields regardless of trace mode.  Debug extras (rendered_prompt,
+    input_tokens list, per-step top-k, extended env) are NEVER part of
+    the canonical hash.
+    """
+    MINIMAL = "minimal"
+    STANDARD = "standard"
+    VERBOSE = "verbose"
 
 
 # ---------------------------------------------------------------------------
@@ -24,16 +43,22 @@ class GenerationStep:
     """A single generation step in the trace.
 
     Minimal mode: only step + chosen_token.
-    Verbose mode: includes top_tokens and top_scores.
+    Standard mode: + is_ambiguous flag.
+    Verbose mode: + top_tokens, top_scores.
     """
     step: int
     chosen_token: int
     top_tokens: list[int] | None = None
     top_scores: list[float] | None = None
+    is_ambiguous: bool = False  # True when top-2 logits are within epsilon
 
-    def to_dict(self, verbose: bool = False) -> dict:
+    def to_dict(self, mode: TraceMode = TraceMode.STANDARD, verbose: bool = False) -> dict:
+        """Serialize step. verbose=True is legacy compat for mode=VERBOSE."""
+        use_verbose = (mode == TraceMode.VERBOSE) or verbose
         d = {"step": self.step, "chosen_token": self.chosen_token}
-        if verbose and self.top_tokens is not None:
+        if self.is_ambiguous:
+            d["is_ambiguous"] = True
+        if use_verbose and self.top_tokens is not None:
             d["top_tokens"] = self.top_tokens
             if self.top_scores is not None:
                 d["top_scores"] = self.top_scores
@@ -123,6 +148,7 @@ class GenerationTrace:
         chosen_token: int,
         top_tokens: list[int] | None = None,
         top_scores: list[float] | None = None,
+        is_ambiguous: bool = False,
     ) -> None:
         """Record a generation step."""
         self.steps.append(GenerationStep(
@@ -130,6 +156,7 @@ class GenerationTrace:
             chosen_token=chosen_token,
             top_tokens=top_tokens,
             top_scores=top_scores,
+            is_ambiguous=is_ambiguous,
         ))
 
     def finalize(self, eos_token_id: int | None = None) -> None:
@@ -145,19 +172,34 @@ class GenerationTrace:
             else:
                 self.stop_reason = "max_new_tokens"
 
-    def to_dict(self, verbose: bool = False) -> dict:
-        d = {
+    def to_dict(self, mode: TraceMode = TraceMode.STANDARD, verbose: bool = False) -> dict:
+        """Serialize generation trace according to trace mode.
+
+        minimal:  prompt_hash, input_tokens_hash, output_tokens/hash, stop_reason
+        standard: + rendered_prompt, input_tokens, steps (chosen_token only)
+        verbose:  + steps with top_tokens/top_scores
+        """
+        effective = TraceMode.VERBOSE if verbose else mode
+
+        # Core fields present in ALL modes (used for canonical hash)
+        d: dict[str, Any] = {
             "turn": self.turn,
             "prompt_hash": self.prompt_hash,
-            "input_tokens": self.input_tokens,
             "input_tokens_hash": self.input_tokens_hash,
             "output_tokens": self.output_tokens,
             "output_tokens_hash": self.output_tokens_hash,
             "stop_reason": self.stop_reason,
-            "steps": [s.to_dict(verbose=verbose) for s in self.steps],
         }
-        if verbose:
+
+        # Standard adds rendered_prompt, input_tokens, and step trace
+        if effective in (TraceMode.STANDARD, TraceMode.VERBOSE):
             d["rendered_prompt"] = self.rendered_prompt
+            d["input_tokens"] = self.input_tokens
+            d["steps"] = [s.to_dict(mode=effective) for s in self.steps]
+
+        # Verbose adds top-k (already handled inside step.to_dict)
+        # Nothing extra needed here — step.to_dict handles it
+
         return d
 
 
@@ -175,6 +217,9 @@ class SessionTrace:
     """
     # Schema
     schema_version: str = "1"
+
+    # Trace type: "inference" or "agent"
+    trace_type: str = "inference"
 
     # Model
     model: str = ""
@@ -199,7 +244,7 @@ class SessionTrace:
     })
 
     # Trace mode
-    trace_mode: str = "minimal"  # "minimal" or "topk"
+    trace_mode: TraceMode = TraceMode.STANDARD
 
     # Messages (semantic)
     messages: list[dict] = field(default_factory=list)
@@ -238,19 +283,30 @@ class SessionTrace:
         self.agent_steps.append(agent_step)
 
     def compute_session_hash(self) -> str:
-        """Compute deterministic session hash.
+        """Compute deterministic session hash from CANONICAL fields only.
 
-        Uses sorted-key canonical JSON of the entire session
-        (excluding session_hash itself) to produce a stable hash.
+        The canonical hash is INDEPENDENT of trace mode. minimal,
+        standard, and verbose traces of the same run produce the
+        same session_hash.  This is a critical design invariant.
+
+        Canonical fields:
+            schema_version, model, model_hash, seed,
+            generation_config, tokenizer fingerprint,
+            messages, per-generation (turn, prompt_hash,
+            input_tokens_hash, output_tokens, output_tokens_hash,
+            stop_reason), quantization, agent_steps,
+            registered_tools.
+
+        NOT included: trace_mode, rendered_prompt, input_tokens,
+        steps, top_tokens, top_scores, environment.
         """
-        d = self._to_hashable_dict()
+        d = self._canonical_dict()
         canonical = json.dumps(d, sort_keys=True, separators=(",", ":"))
         self.session_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         return self.session_hash
 
-    def _to_hashable_dict(self) -> dict:
-        """Convert to dict for hashing (excludes session_hash)."""
-        verbose = self.trace_mode == "topk"
+    def _canonical_dict(self) -> dict:
+        """Core execution fields only — deterministic across trace modes."""
         return {
             "schema_version": self.schema_version,
             "model": self.model,
@@ -258,28 +314,44 @@ class SessionTrace:
             "seed": self.seed,
             "generation_config": self.generation_config,
             "tokenizer": self.tokenizer_info,
-            "trace_mode": self.trace_mode,
             "messages": self.messages,
-            "generations": [g.to_dict(verbose=verbose) for g in self.generations],
+            "generations": [
+                {
+                    "turn": g.turn,
+                    "prompt_hash": g.prompt_hash,
+                    "input_tokens_hash": g.input_tokens_hash,
+                    "output_tokens": g.output_tokens,
+                    "output_tokens_hash": g.output_tokens_hash,
+                    "stop_reason": g.stop_reason,
+                }
+                for g in self.generations
+            ],
             "quantization": self.quantization,
             "agent_steps": [s.to_dict() for s in self.agent_steps],
             "registered_tools": self.registered_tools,
         }
 
     def to_dict(self) -> dict:
-        """Convert full session to dict for JSON export."""
-        verbose = self.trace_mode == "topk"
+        """Convert full session to dict for JSON export.
+
+        Output varies by trace_mode:
+          minimal:  canonical fields + session_hash + basic env
+          standard: + rendered_prompt, input_tokens, steps
+          verbose:  + top_tokens, top_scores, extended env
+        """
+        mode = self.trace_mode if isinstance(self.trace_mode, TraceMode) else TraceMode(self.trace_mode)
         return {
             "schema_version": self.schema_version,
+            "trace_type": self.trace_type,
+            "trace_mode": mode.value,
             "model": self.model,
             "model_hash": self.model_hash,
             "seed": self.seed,
             "session_hash": self.session_hash,
             "generation_config": self.generation_config,
             "tokenizer": self.tokenizer_info,
-            "trace_mode": self.trace_mode,
             "messages": self.messages,
-            "generations": [g.to_dict(verbose=verbose) for g in self.generations],
+            "generations": [g.to_dict(mode=mode) for g in self.generations],
             "environment": self.environment,
             "quantization": self.quantization,
             "agent_steps": [s.to_dict() for s in self.agent_steps],
@@ -287,16 +359,28 @@ class SessionTrace:
         }
 
     def export_json(self, path: str) -> None:
-        """Export session trace to JSON file."""
+        """Export session trace to JSON file.
+
+        Supports gzip: pass a path ending in .gz for compressed output.
+        """
         self.compute_session_hash()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+        data = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+        if path.endswith(".gz"):
+            with gzip.open(path, "wt", encoding="utf-8") as f:
+                f.write(data)
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(data)
 
     @classmethod
     def from_json(cls, path: str) -> "SessionTrace":
-        """Load session trace from JSON file."""
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        """Load session trace from JSON file (supports .gz)."""
+        if path.endswith(".gz"):
+            with gzip.open(path, "rt", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
         return cls.from_dict(data)
 
     @classmethod
@@ -304,12 +388,13 @@ class SessionTrace:
         """Reconstruct SessionTrace from dict."""
         session = cls(
             schema_version=data.get("schema_version", "1"),
+            trace_type=data.get("trace_type", "inference"),
             model=data.get("model", ""),
             model_hash=data.get("model_hash", ""),
             seed=data.get("seed", 42),
             generation_config=data.get("generation_config", {}),
             tokenizer_info=data.get("tokenizer", {}),
-            trace_mode=data.get("trace_mode", "minimal"),
+            trace_mode=TraceMode(data.get("trace_mode", "standard")),
             messages=data.get("messages", []),
             environment=data.get("environment", {}),
             session_hash=data.get("session_hash", ""),
@@ -334,6 +419,7 @@ class SessionTrace:
                     chosen_token=step_data["chosen_token"],
                     top_tokens=step_data.get("top_tokens"),
                     top_scores=step_data.get("top_scores"),
+                    is_ambiguous=step_data.get("is_ambiguous", False),
                 ))
             session.generations.append(trace)
 

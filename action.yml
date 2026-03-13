@@ -53,47 +53,88 @@ runs:
     - name: Install detinfer
       shell: bash
       run: |
-        pip install "detinfer[transformers]"
+        python -m pip install "${GITHUB_ACTION_PATH}[transformers]"
 
     - name: Run detinfer
       id: run
       shell: bash
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_SESSION_FILE: ${{ inputs.session-file }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_SEED: ${{ inputs.seed }}
+        INPUT_STRICT: ${{ inputs.strict }}
+        INPUT_EXPORT: ${{ inputs.export }}
       run: |
-        set -e
+        set -euo pipefail
 
-        COMMAND="${{ inputs.command }}"
+        session_hash=""
+        command="${INPUT_COMMAND}"
 
-        if [ "$COMMAND" = "verify-session" ]; then
-          ARGS="${{ inputs.session-file }}"
-          if [ "${{ inputs.model }}" != "" ]; then
-            ARGS="$ARGS --model ${{ inputs.model }}"
+        if [ "$command" = "verify-session" ]; then
+          if [ -z "${INPUT_SESSION_FILE}" ]; then
+            echo "session-file input is required for verify-session"
+            printf 'passed=false\n' >> "$GITHUB_OUTPUT"
+            exit 1
           fi
-          if [ "${{ inputs.strict }}" = "true" ]; then
-            ARGS="$ARGS --strict"
+          cmd=(detinfer verify-session "${INPUT_SESSION_FILE}")
+          if [ -n "${INPUT_MODEL}" ]; then
+            cmd+=(--model "${INPUT_MODEL}")
           fi
-          if detinfer verify-session $ARGS; then
-            echo "passed=true" >> $GITHUB_OUTPUT
+          if [ "${INPUT_STRICT}" = "true" ]; then
+            cmd+=(--strict)
+          fi
+          if output="$("${cmd[@]}" 2>&1)"; then
+            printf '%s\n' "$output"
+            printf 'passed=true\n' >> "$GITHUB_OUTPUT"
+            session_hash="$(printf '%s\n' "$output" | awk -F'Session hash: ' '/Session hash:/ {print $2}' | tail -n 1)"
           else
-            echo "passed=false" >> $GITHUB_OUTPUT
+            printf '%s\n' "$output"
+            printf 'passed=false\n' >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
-        elif [ "$COMMAND" = "agent" ]; then
-          ARGS="${{ inputs.model }} --seed ${{ inputs.seed }}"
-          if [ "${{ inputs.prompt }}" != "" ]; then
-            ARGS="$ARGS --prompt \"${{ inputs.prompt }}\""
+        elif [ "$command" = "agent" ]; then
+          if [ -z "${INPUT_MODEL}" ]; then
+            echo "model input is required for agent"
+            printf 'passed=false\n' >> "$GITHUB_OUTPUT"
+            exit 1
           fi
-          if [ "${{ inputs.export }}" != "" ]; then
-            ARGS="$ARGS --export ${{ inputs.export }}"
+          if [ -z "${INPUT_PROMPT}" ]; then
+            echo "prompt input is required for agent in GitHub Actions"
+            printf 'passed=false\n' >> "$GITHUB_OUTPUT"
+            exit 1
           fi
-          eval detinfer agent $ARGS
-          echo "passed=true" >> $GITHUB_OUTPUT
+          cmd=(detinfer agent "${INPUT_MODEL}" --seed "${INPUT_SEED}")
+          if [ -n "${INPUT_PROMPT}" ]; then
+            cmd+=(--prompt "${INPUT_PROMPT}")
+          fi
+          if [ -n "${INPUT_EXPORT}" ]; then
+            cmd+=(--export "${INPUT_EXPORT}")
+          fi
+          if output="$("${cmd[@]}" 2>&1)"; then
+            printf '%s\n' "$output"
+            printf 'passed=true\n' >> "$GITHUB_OUTPUT"
+            session_hash="$(printf '%s\n' "$output" | awk -F'Session hash: ' '/Session hash:/ {print $2}' | tail -n 1)"
+          else
+            printf '%s\n' "$output"
+            printf 'passed=false\n' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
-        elif [ "$COMMAND" = "verify" ]; then
-          detinfer verify ${{ inputs.model }} --seed ${{ inputs.seed }}
-          echo "passed=true" >> $GITHUB_OUTPUT
+        elif [ "$command" = "verify" ]; then
+          if [ -z "${INPUT_MODEL}" ]; then
+            echo "model input is required for verify"
+            printf 'passed=false\n' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          detinfer verify "${INPUT_MODEL}" --seed "${INPUT_SEED}"
+          printf 'passed=true\n' >> "$GITHUB_OUTPUT"
 
         else
-          echo "Unknown command: $COMMAND"
+          echo "Unknown command: $command"
           exit 1
         fi
+
+        printf 'session_hash=%s\n' "$session_hash" >> "$GITHUB_OUTPUT"

@@ -47,7 +47,8 @@ class InferenceProof:
 
     # Metadata
     timestamp: str = ""
-    detinfer_version: str = "0.2.3"
+    detinfer_version: str = "0.3.0"
+    trace_type: str = "inference"
     
     # Token-level details (Gold standard schema)
     input_tokens_hash: str = ""
@@ -68,10 +69,14 @@ class InferenceProof:
     @classmethod
     def load(cls, path: str | Path) -> "InferenceProof":
         """Load proof from a JSON file."""
+        import dataclasses
         path = Path(path)
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return cls(**data)
+        # Only pass fields that exist in the dataclass (handles old + future JSONs)
+        known = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in known}
+        return cls(**filtered)
 
     def __str__(self) -> str:
         lines = [
@@ -275,7 +280,10 @@ def cross_verify(proof: InferenceProof) -> CrossVerifyResult:
         seed=proof.seed,
         precision=proof.precision,
     )
-    engine.load(proof.model_name)
+    load_kwargs = {}
+    if proof.quantization in {"bitsandbytes", "int8"}:
+        load_kwargs["quantize"] = "int8"
+    engine.load(proof.model_name, **load_kwargs)
 
     # Run the same inference
     result = engine.run(proof.prompt, max_new_tokens=proof.max_new_tokens)

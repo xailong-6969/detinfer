@@ -1,0 +1,18 @@
+{
+  "name": "long_reasoning",
+  "description": "Stress: longer generation with explanation",
+  "model": "<hf-model>",
+  "seed": 42,
+  "prompt": "Explain how photosynthesis works in simple terms.",
+  "max_turns": 1,
+  "generation_config": {
+    "max_new_tokens": 150,
+    "do_sample": false,
+    "temperature": 0.0
+  },
+  "expected": {
+    "match": "regex",
+    "value": "(?i)plant|sun|light|energy"
+  },
+  "tags": ["stress", "reasoning"]
+}

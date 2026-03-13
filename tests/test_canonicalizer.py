@@ -74,6 +74,17 @@ class TestOutputCanonicalizer:
         assert result.precision == Precision.TOKEN_LEVEL
         assert len(result.canonical_hash) == 64
 
+    def test_token_precision_canonicalize_hashes_token_ids(self):
+        """Token precision should hash token IDs directly without rounding lookup."""
+        canon = OutputCanonicalizer(precision="token")
+        tokens = torch.tensor([[1, 2, 3]], dtype=torch.int64)
+
+        from_int = canon.canonicalize(tokens)
+        from_float = canon.canonicalize(tokens.float())
+
+        assert from_int.precision == Precision.TOKEN_LEVEL
+        assert from_int.canonical_hash == from_float.canonical_hash
+
     def test_logits_same_top_tokens_same_hash(self):
         """Two logits with same top tokens should produce same canonical hash."""
         canon = OutputCanonicalizer(precision="token")

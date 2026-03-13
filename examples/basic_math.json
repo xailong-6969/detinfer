@@ -1,0 +1,18 @@
+{
+  "name": "basic_math",
+  "description": "Smoke test: simple arithmetic",
+  "model": "<hf-model>",
+  "seed": 42,
+  "prompt": "What is 2+2?",
+  "max_turns": 1,
+  "generation_config": {
+    "max_new_tokens": 64,
+    "do_sample": false,
+    "temperature": 0.0
+  },
+  "expected": {
+    "match": "contains",
+    "value": "2"
+  },
+  "tags": ["smoke", "math"]
+}
