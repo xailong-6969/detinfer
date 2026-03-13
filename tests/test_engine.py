@@ -1,7 +1,11 @@
 """Tests for detinfer.engine -- DeterministicEngine."""
 
+import contextlib
+
+import torch
 import torch.nn as nn
 
+import detinfer.inference.engine as engine_mod
 from detinfer.inference.engine import DeterministicEngine
 
 
@@ -80,3 +84,72 @@ def test_load_model_applies_deterministic_config(monkeypatch):
     engine.load_model(model)
 
     assert applied["count"] == 1
+
+
+def test_verify_uses_deterministic_context_for_prompt(monkeypatch):
+    engine = _make_engine(monkeypatch)
+    engine.model = TrackToModel()
+    engine.tokenizer = object()
+    entered = []
+
+    @contextlib.contextmanager
+    def fake_context():
+        entered.append("enter")
+        try:
+            yield
+        finally:
+            entered.append("exit")
+
+    class FakeVerifier:
+        def __init__(self, model, tokenizer=None, device=None):
+            assert model is engine.model
+            assert tokenizer is engine.tokenizer
+            assert device == engine.device
+
+        def verify(self, prompt, num_runs=5, seed=42):
+            assert prompt == "hello"
+            assert num_runs == 2
+            assert seed == engine.seed
+            assert entered == ["enter"]
+            return "prompt-ok"
+
+    monkeypatch.setattr(engine.enforcer, "deterministic_context", fake_context)
+    monkeypatch.setattr(engine_mod, "InferenceVerifier", FakeVerifier)
+
+    assert engine.verify(prompt="hello", num_runs=2) == "prompt-ok"
+    assert entered == ["enter", "exit"]
+
+
+def test_verify_uses_deterministic_context_for_tensor_input(monkeypatch):
+    engine = _make_engine(monkeypatch)
+    engine.model = TrackToModel()
+    entered = []
+
+    @contextlib.contextmanager
+    def fake_context():
+        entered.append("enter")
+        try:
+            yield
+        finally:
+            entered.append("exit")
+
+    class FakeVerifier:
+        def __init__(self, model, tokenizer=None, device=None):
+            assert model is engine.model
+            assert tokenizer is engine.tokenizer
+            assert device == engine.device
+
+        def verify_with_input(self, input_tensor, num_runs=5, seed=42):
+            assert torch.equal(input_tensor, torch.tensor([[1.0, 2.0, 3.0, 4.0]]))
+            assert num_runs == 3
+            assert seed == engine.seed
+            assert entered == ["enter"]
+            return "tensor-ok"
+
+    monkeypatch.setattr(engine.enforcer, "deterministic_context", fake_context)
+    monkeypatch.setattr(engine_mod, "InferenceVerifier", FakeVerifier)
+
+    input_tensor = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    assert engine.verify(input_tensor=input_tensor, num_runs=3) == "tensor-ok"
+    assert entered == ["enter", "exit"]
+

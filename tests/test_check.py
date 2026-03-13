@@ -30,6 +30,7 @@ def _make_session(
     output_tokens=None,
     environment=None,
     stop_reason="eos",
+    session_hash="deadbeef",
 ) -> dict:
     """Build a minimal session dict for testing."""
     return {
@@ -37,7 +38,7 @@ def _make_session(
         "model": model,
         "model_hash": model_hash,
         "seed": seed,
-        "session_hash": "deadbeef",
+        "session_hash": session_hash,
         "trace_mode": "standard",
         "generation_config": {
             "do_sample": False,
@@ -89,6 +90,7 @@ class TestSeverity:
 
     def test_warning_types(self):
         assert mismatch_severity("ENVIRONMENT_DRIFT") == "warning"
+        assert mismatch_severity("SESSION_HASH_DRIFT") == "warning"
 
     def test_info_types(self):
         assert mismatch_severity("TRACE_DETAIL_DRIFT") == "info"
@@ -217,6 +219,34 @@ class TestPolicy:
         # With allow: should pass
         report = check_sessions(a, b, allow={"CONFIG_DRIFT"})
         assert report.status == "pass"
+
+
+class TestSessionHashDrift:
+    def test_session_hash_only_is_warning(self):
+        a = _make_session(session_hash="hash_a")
+        b = _make_session(session_hash="hash_b")
+
+        report = check_sessions(a, b)
+
+        assert report.status == "pass"
+        assert report.primary_type == "SESSION_HASH_DRIFT"
+        assert any(m.type == "SESSION_HASH_DRIFT" for m in report.mismatches)
+        assert len(report.warnings) > 0
+
+
+class TestAllowedDriftWithSessionHash:
+    def test_allow_config_drift_still_passes_with_realistic_session_hash_change(self):
+        a = _make_session(seed=42, session_hash="hash_a")
+        b = _make_session(seed=99, session_hash="hash_b")
+
+        report = check_sessions(a, b, allow={"CONFIG_DRIFT"})
+
+        assert report.status == "pass"
+        assert all(
+            not (m.field == "session_hash" and m.type == "OUTPUT_DRIFT")
+            for m in report.mismatches
+        )
+        assert any(m.type == "SESSION_HASH_DRIFT" for m in report.mismatches)
 
 
 # ---------------------------------------------------------------------------

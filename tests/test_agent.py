@@ -12,6 +12,7 @@ import tempfile
 import pytest
 
 from detinfer.agent.trace import (
+    AgentStep,
     GenerationStep,
     GenerationTrace,
     SessionTrace,
@@ -249,7 +250,7 @@ class TestHashing:
 # ---------------------------------------------------------------------------
 
 class TestDiff:
-    def _make_session(self, tokens: list[int]) -> str:
+    def _make_session(self, tokens: list[int], agent_steps=None) -> str:
         session = SessionTrace(model="test-model", seed=42)
         session.add_message("user", "test")
         session.add_message("assistant", "response")
@@ -257,6 +258,8 @@ class TestDiff:
         gen.output_tokens = tokens
         gen.finalize(eos_token_id=50256)
         session.add_generation(gen)
+        for agent_step in agent_steps or []:
+            session.add_agent_step(agent_step)
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False
@@ -291,6 +294,48 @@ class TestDiff:
             os.unlink(p1)
             os.unlink(p2)
 
+    def test_generation_turn_mismatch(self):
+        from detinfer.agent.replay import diff_sessions
+
+        p1 = self._make_session(
+            [10, 20],
+            agent_steps=[AgentStep(step=1, type="llm_generation", turn=1, generation_turn=1)],
+        )
+        p2 = self._make_session(
+            [10, 20],
+            agent_steps=[AgentStep(step=1, type="llm_generation", turn=1, generation_turn=2)],
+        )
+        try:
+            result = diff_sessions(p1, p2)
+            assert not result.identical
+            assert result.mismatch_type == "generation_turn"
+            assert result.expected == 1
+            assert result.observed == 2
+        finally:
+            os.unlink(p1)
+            os.unlink(p2)
+
+    def test_checkpoint_payload_mismatch(self):
+        from detinfer.agent.replay import diff_sessions
+
+        p1 = self._make_session(
+            [10, 20],
+            agent_steps=[AgentStep(step=1, type="checkpoint", turn=1, checkpoint_data={"event": "truncation", "messages_dropped": 1})],
+        )
+        p2 = self._make_session(
+            [10, 20],
+            agent_steps=[AgentStep(step=1, type="checkpoint", turn=1, checkpoint_data={"event": "truncation", "messages_dropped": 2})],
+        )
+        try:
+            result = diff_sessions(p1, p2)
+            assert not result.identical
+            assert result.mismatch_type == "checkpoint_data"
+            assert "messages_dropped" in result.expected
+            assert "messages_dropped" in result.observed
+        finally:
+            os.unlink(p1)
+            os.unlink(p2)
+
 
 class TestReplay:
     def test_replay_preserves_tool_messages(self, monkeypatch):
@@ -314,6 +359,7 @@ class TestReplay:
                 trace_mode: str = "standard",
                 quantize: str | None = None,
                 system_prompt: str | None = None,
+                max_context_tokens: int | None = None,
             ):
                 self.model_name = model_name
                 self.seed = seed
@@ -382,6 +428,71 @@ class TestReplay:
         finally:
             os.unlink(path)
 
+    def test_replay_restores_max_context_tokens(self, monkeypatch):
+        from detinfer.agent.replay import replay_session
+        import detinfer.agent.runtime as runtime_mod
+
+        captured = {}
+
+        class FakeSession:
+            def __init__(self):
+                self.generations = []
+                self.messages = []
+
+            def add_message(self, role: str, content: str) -> None:
+                self.messages.append({"role": role, "content": content})
+
+        class FakeAgent:
+            def __init__(
+                self,
+                model_name: str,
+                seed: int = 42,
+                max_new_tokens: int = 256,
+                trace_mode: str = "standard",
+                quantize: str | None = None,
+                system_prompt: str | None = None,
+                max_context_tokens: int | None = None,
+            ):
+                captured["max_context_tokens"] = max_context_tokens
+                self.model_name = model_name
+                self.session = FakeSession()
+                self._turn_count = 0
+
+                if system_prompt:
+                    self.session.add_message("system", system_prompt)
+
+            def chat(self, message: str) -> str:
+                self._turn_count += 1
+                self.session.add_message("user", message)
+                gen = GenerationTrace(turn=self._turn_count)
+                gen.output_tokens = [10]
+                gen.stop_reason = "max_new_tokens"
+                self.session.generations.append(gen)
+                self.session.add_message("assistant", "ok")
+                return "ok"
+
+        session = SessionTrace(trace_type="agent", model="test-model", seed=42)
+        session.generation_config["max_context_tokens"] = 64
+        session.add_message("user", "hello")
+        session.add_message("assistant", "ok")
+
+        gen = GenerationTrace(turn=1)
+        gen.output_tokens = [10]
+        gen.stop_reason = "max_new_tokens"
+        session.add_generation(gen)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            path = f.name
+
+        try:
+            session.export_json(path)
+            monkeypatch.setattr(runtime_mod, "DeterministicAgent", FakeAgent)
+            result = replay_session(path)
+            assert result.passed
+            assert captured["max_context_tokens"] == 64
+        finally:
+            os.unlink(path)
+
     def test_replay_strict_requires_step_data(self, monkeypatch):
         from detinfer.agent.replay import replay_session
         import detinfer.agent.runtime as runtime_mod
@@ -403,6 +514,7 @@ class TestReplay:
                 trace_mode: str = "standard",
                 quantize: str | None = None,
                 system_prompt: str | None = None,
+                max_context_tokens: int | None = None,
             ):
                 self.model_name = model_name
                 self.seed = seed
